@@ -103,10 +103,49 @@ export interface paths {
         put?: never;
         /**
          * Build Curve
-         * @description Synchronous curve build. See app.tasks.curve_tasks for the async/Arq job version
-         *     used once curve builds are wired into the background-job flow (build step 6).
+         * @description Synchronous curve build -- blocks until the bootstrap finishes. Fine for v1's
+         *     single-commodity monthly curve (milliseconds of work); see /curves/build-async for
+         *     the background-job version once curve builds get heavier.
          */
         post: operations["build_curve_api_v1_curves_build_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/curves/build-async": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Build Curve Async
+         * @description Enqueues the same build onto the Arq worker (app.tasks.curve_tasks.calibrate_curve)
+         *     and returns immediately with a job id -- poll /curves/build-async/{job_id}.
+         */
+        post: operations["build_curve_async_api_v1_curves_build_async_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/curves/build-async/{job_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Curve Build Job */
+        get: operations["get_curve_build_job_api_v1_curves_build_async__job_id__get"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -158,9 +197,45 @@ export interface paths {
         put?: never;
         /**
          * Run Var
-         * @description Synchronous VaR run. See app.tasks.risk_tasks for the Arq background-job version.
+         * @description Synchronous VaR run -- fine for v1's small position/history size. See
+         *     /risk/var/run-async for the background-job version (app.tasks.risk_tasks.run_var_job)
+         *     once scenario windows/position counts get large enough to matter.
          */
         post: operations["run_var_api_v1_risk_var_run_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/risk/var/run-async": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Run Var Async */
+        post: operations["run_var_async_api_v1_risk_var_run_async_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/risk/var/run-async/{job_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Var Job */
+        get: operations["get_var_job_api_v1_risk_var_run_async__job_id__get"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -191,8 +266,46 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Get Delta Ladder */
+        /**
+         * Get Delta Ladder
+         * @description Synchronous delta-ladder run. See /risk/delta-ladder/run-async for the
+         *     background-job version (app.tasks.risk_tasks.run_sensitivities_job).
+         */
         get: operations["get_delta_ladder_api_v1_risk_delta_ladder_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/risk/delta-ladder/run-async": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Run Delta Ladder Async */
+        post: operations["run_delta_ladder_async_api_v1_risk_delta_ladder_run_async_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/risk/delta-ladder/run-async/{job_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Delta Ladder Job */
+        get: operations["get_delta_ladder_job_api_v1_risk_delta_ladder_run_async__job_id__get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -351,6 +464,21 @@ export interface components {
             /** Buckets */
             buckets: components["schemas"]["SensitivityResultRead"][];
         };
+        /** DeltaLadderRunRequest */
+        DeltaLadderRunRequest: {
+            /**
+             * Book Id
+             * Format: uuid
+             */
+            book_id: string;
+            /**
+             * As Of Date
+             * Format: date
+             */
+            as_of_date: string;
+            /** @default HENRY_HUB */
+            commodity: components["schemas"]["Commodity"];
+        };
         /** ForwardCurveRead */
         ForwardCurveRead: {
             /**
@@ -381,6 +509,20 @@ export interface components {
         HTTPValidationError: {
             /** Detail */
             detail?: components["schemas"]["ValidationError"][];
+        };
+        /** JobEnqueuedRead */
+        JobEnqueuedRead: {
+            /** Job Id */
+            job_id: string;
+        };
+        /** JobStatusRead */
+        JobStatusRead: {
+            /** Job Id */
+            job_id: string;
+            /** Status */
+            status: string;
+            /** Result */
+            result?: unknown | null;
         };
         /** MarketDataPointCreate */
         MarketDataPointCreate: {
@@ -907,6 +1049,70 @@ export interface operations {
             };
         };
     };
+    build_curve_async_api_v1_curves_build_async_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CurveBuildRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JobEnqueuedRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_curve_build_job_api_v1_curves_build_async__job_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                job_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JobStatusRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     get_curve_api_v1_curves__curve_id__get: {
         parameters: {
             query?: never;
@@ -1005,6 +1211,70 @@ export interface operations {
             };
         };
     };
+    run_var_async_api_v1_risk_var_run_async_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["VarRunRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JobEnqueuedRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_var_job_api_v1_risk_var_run_async__job_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                job_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JobStatusRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     get_var_result_api_v1_risk_var__var_result_id__get: {
         parameters: {
             query?: never;
@@ -1056,6 +1326,70 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["DeltaLadderRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    run_delta_ladder_async_api_v1_risk_delta_ladder_run_async_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DeltaLadderRunRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JobEnqueuedRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_delta_ladder_job_api_v1_risk_delta_ladder_run_async__job_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                job_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JobStatusRead"];
                 };
             };
             /** @description Validation Error */

@@ -39,3 +39,9 @@ class DeltaLadderRead(BaseModel):
     as_of_date: date
     curve_id: uuid.UUID
     buckets: list[SensitivityResultRead]
+
+
+class DeltaLadderRunRequest(BaseModel):
+    book_id: uuid.UUID
+    as_of_date: date
+    commodity: Commodity = Commodity.HENRY_HUB

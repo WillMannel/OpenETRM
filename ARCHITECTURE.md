@@ -89,6 +89,39 @@ Explicitly **out of scope** for v1 (future work, not built): full deal lifecycle
 (confirmations/settlement/invoicing), regulatory reporting, multiple asset classes,
 options/optionality, live market data feeds, auth/multi-tenancy hardening.
 
+### Async job endpoints
+
+Curve build, VaR, and delta-ladder each have a synchronous endpoint (blocks until done —
+fine at v1's size) and an async counterpart that enqueues onto the Arq worker and
+returns a job id to poll:
+
+| Sync | Async enqueue | Poll |
+|---|---|---|
+| `POST /curves/build` | `POST /curves/build-async` | `GET /curves/build-async/{job_id}` |
+| `POST /risk/var/run` | `POST /risk/var/run-async` | `GET /risk/var/run-async/{job_id}` |
+| `GET /risk/delta-ladder` | `POST /risk/delta-ladder/run-async` | `GET /risk/delta-ladder/run-async/{job_id}` |
+
+`GET .../{job_id}` returns `{job_id, status, result}` where `status` is one of Arq's
+`deferred | queued | in_progress | complete | not_found` and `result` is the created
+row's id once `complete`. The frontend doesn't use these yet (v1's data volumes are
+small enough that the sync path is fine) — they exist so heavier workloads have
+somewhere to go without an API shape change. `app/core/jobs.py` has the pool/polling
+details.
+
+## CI
+
+- `backend-lint` / `backend-test`: SQLite-backed, no external services, fast.
+- `backend-integration-postgres`: the one job that's actually representative of
+  production — real Postgres/TimescaleDB + Redis service containers, runs the real
+  Alembic migration (not `Base.metadata.create_all`), and runs
+  `tests/integration/test_worker_e2e.py` (skipped by default elsewhere) against a real
+  Arq worker subprocess to prove the async job path actually works end to end, not just
+  that it enqueues.
+- `contract-check`: regenerates the frontend's TS types from the backend's live OpenAPI
+  schema and diffs against the committed `frontend/src/api/generated/types.ts`, so the
+  two can't silently drift apart.
+- `frontend-lint-and-test`, `docker-build`: as named.
+
 ## Repository layout
 
 ```
