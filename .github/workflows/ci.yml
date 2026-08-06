@@ -8,26 +8,33 @@ on:
 jobs:
   backend-lint:
     runs-on: ubuntu-latest
+    # Run from backend/ (not repo root) so mypy/ruff pick up backend/pyproject.toml --
+    # notably `ignore_missing_imports = true`, which QuantLib/pandas need.
+    defaults:
+      run:
+        working-directory: backend
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-      - run: pip install -e "./backend[dev]"
-      - run: ruff check backend/app backend/tests
-      - run: ruff format --check backend/app backend/tests
-      - run: mypy backend/app
+      - run: pip install -e ".[dev]"
+      - run: ruff check app tests
+      - run: ruff format --check app tests
+      - run: mypy app
 
   backend-test:
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-      - run: pip install -e "./backend[dev]"
+      - run: pip install -e ".[dev]"
       - run: pytest -q
-        working-directory: backend
 
   frontend-lint-and-test:
     runs-on: ubuntu-latest
