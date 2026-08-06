@@ -62,7 +62,9 @@ async def test_create_trade_rejects_invalid_delivery_range(
 
 
 @pytest.mark.asyncio
-async def test_create_and_list_counterparties_and_books(client: AsyncClient, db_session: AsyncSession):
+async def test_create_and_list_counterparties_and_books(
+    client: AsyncClient, db_session: AsyncSession
+):
     cp_resp = await client.post("/api/v1/counterparties", json={"name": "Delta Energy"})
     assert cp_resp.status_code == 201
 
