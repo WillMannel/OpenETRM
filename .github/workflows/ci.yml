@@ -1,0 +1,56 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  backend-lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install -e "./backend[dev]"
+      - run: ruff check backend/app backend/tests
+      - run: ruff format --check backend/app backend/tests
+      - run: mypy backend/app
+
+  backend-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install -e "./backend[dev]"
+      - run: pytest -q
+        working-directory: backend
+
+  frontend-lint-and-test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm install
+      - run: npx tsc -b
+      - run: npx eslint src --ext .ts,.tsx
+      - run: npx vitest run
+      - run: npm run build
+
+  docker-build:
+    runs-on: ubuntu-latest
+    needs: [backend-test, frontend-lint-and-test]
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build -t openetrm-api ./backend
+      - run: docker build -t openetrm-web ./frontend
