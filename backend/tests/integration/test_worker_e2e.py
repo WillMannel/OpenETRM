@@ -11,8 +11,20 @@ reachable services *before* pytest starts -- the SQLite-per-test trick the rest 
 suite uses doesn't apply here. See .github/workflows/ci.yml's backend-integration-postgres
 job for how those env vars get set in CI (real Postgres/Timescale + Redis service
 containers, `alembic upgrade head` run first). For local reproduction against SQLite +
-a local `redis-server` instead of Postgres, see the CI job's comments for the equivalent
-manual steps.
+a local `redis-server` instead of Postgres, see that CI job's comments for the
+equivalent manual steps.
+
+Both scenarios (curve build, VaR run) live in one test function rather than two,
+deliberately: app.core.jobs' Arq pool and app.core.db's SQLAlchemy engine are each
+created once and cached for the process's lifetime -- correct for a real app (one
+event loop, forever), but asyncpg's connections are bound to the event loop that opened
+them, and pytest-asyncio hands each *test function* a fresh event loop by default. Two
+separate test functions reusing those same cached, loop-bound resources across that
+boundary fails with "Future attached to a different loop" against real Postgres (it
+happened to work against SQLite locally, which is laxer about this -- don't trust that).
+One test function means one event loop for the whole scenario, which is both the fix
+and the more honest shape for a test of one continuously-running process serving
+multiple requests.
 """
 
 import asyncio
@@ -32,21 +44,7 @@ pytestmark = pytest.mark.skipif(
 )
 
 
-@pytest.fixture(autouse=True)
-def _fresh_arq_pool():
-    """app.core.jobs caches its Redis pool at module scope for the lifetime of the
-    process -- correct for a real app (one event loop, forever), but pytest-asyncio
-    hands each test function a fresh event loop, and a pool's connections are bound to
-    the loop they were opened on. Reset the cache each test so it reopens against
-    *this* test's loop instead of raising "Event loop is closed" on the second test."""
-    import app.core.jobs as jobs_module
-
-    jobs_module._pool = None
-    yield
-    jobs_module._pool = None
-
-
-@pytest.fixture(scope="module")
+@pytest.fixture
 def worker_process():
     proc = subprocess.Popen(
         [sys.executable, "-m", "arq", "app.tasks.worker.WorkerSettings"],
@@ -81,33 +79,7 @@ async def _poll_until_complete(
 
 
 @pytest.mark.asyncio
-async def test_curve_build_async_runs_on_real_worker(worker_process):
-    from app.main import app  # imported here, after env vars are guaranteed set
-
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
-        as_of = date(2026, 3, 10).isoformat()
-        for delivery_month, price in [("2026-06-01", 3.1), ("2026-07-01", 3.2)]:
-            resp = await client.post(
-                "/api/v1/market-data/quotes",
-                json={"quote_date": as_of, "delivery_month": delivery_month, "price": price},
-            )
-            assert resp.status_code == 201
-
-        enqueue_resp = await client.post("/api/v1/curves/build-async", json={"as_of_date": as_of})
-        assert enqueue_resp.status_code == 202
-        job_id = enqueue_resp.json()["job_id"]
-
-        status = await _poll_until_complete(client, f"/api/v1/curves/build-async/{job_id}")
-        curve_id = status["result"]
-        assert curve_id is not None
-
-        curve_resp = await client.get(f"/api/v1/curves/{curve_id}")
-        assert curve_resp.status_code == 200
-        assert len(curve_resp.json()["points"]) == 2
-
-
-@pytest.mark.asyncio
-async def test_var_run_async_runs_on_real_worker(worker_process):
+async def test_curve_build_and_var_run_async_on_real_worker(worker_process):
     from app.core.db import async_session_factory
     from app.main import app
     from app.modules.trade_capture.models import Book, Counterparty
@@ -120,23 +92,47 @@ async def test_var_run_async_runs_on_real_worker(worker_process):
         book_id = str(book.id)
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
-        as_of = date(2026, 3, 11).isoformat()
-        for quote_date, price in [("2026-03-09", 3.0), ("2026-03-10", 3.1), (as_of, 3.05)]:
+        # --- curve build: enqueue, poll, verify the worker actually built it ---
+        curve_as_of = date(2026, 3, 10).isoformat()
+        for delivery_month, price in [("2026-06-01", 3.1), ("2026-07-01", 3.2)]:
+            resp = await client.post(
+                "/api/v1/market-data/quotes",
+                json={"quote_date": curve_as_of, "delivery_month": delivery_month, "price": price},
+            )
+            assert resp.status_code == 201
+
+        curve_enqueue = await client.post(
+            "/api/v1/curves/build-async", json={"as_of_date": curve_as_of}
+        )
+        assert curve_enqueue.status_code == 202
+        curve_job_status = await _poll_until_complete(
+            client, f"/api/v1/curves/build-async/{curve_enqueue.json()['job_id']}"
+        )
+        curve_id = curve_job_status["result"]
+        assert curve_id is not None
+
+        curve_resp = await client.get(f"/api/v1/curves/{curve_id}")
+        assert curve_resp.status_code == 200
+        assert len(curve_resp.json()["points"]) == 2
+
+        # --- VaR run: enqueue, poll, verify the worker actually computed it ---
+        var_as_of = date(2026, 3, 11).isoformat()
+        for quote_date, price in [("2026-03-09", 3.0), ("2026-03-10", 3.1), (var_as_of, 3.05)]:
             resp = await client.post(
                 "/api/v1/market-data/quotes",
                 json={"quote_date": quote_date, "delivery_month": "2026-06-01", "price": price},
             )
             assert resp.status_code == 201
 
-        enqueue_resp = await client.post(
+        var_enqueue = await client.post(
             "/api/v1/risk/var/run-async",
-            json={"book_id": book_id, "as_of_date": as_of, "scenario_window_days": 30},
+            json={"book_id": book_id, "as_of_date": var_as_of, "scenario_window_days": 30},
         )
-        assert enqueue_resp.status_code == 202
-        job_id = enqueue_resp.json()["job_id"]
-
-        status = await _poll_until_complete(client, f"/api/v1/risk/var/run-async/{job_id}")
-        var_result_id = status["result"]
+        assert var_enqueue.status_code == 202
+        var_job_status = await _poll_until_complete(
+            client, f"/api/v1/risk/var/run-async/{var_enqueue.json()['job_id']}"
+        )
+        var_result_id = var_job_status["result"]
         assert var_result_id is not None
 
         var_resp = await client.get(f"/api/v1/risk/var/{var_result_id}")
