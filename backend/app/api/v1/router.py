@@ -2,6 +2,7 @@ from fastapi import APIRouter
 
 from app.modules.audit.router import router as audit_router
 from app.modules.auth.router import router as auth_router
+from app.modules.limits.router import router as limits_router
 from app.modules.market_data.router import router as market_data_router
 from app.modules.risk.router import router as risk_router
 from app.modules.trade_capture.router import change_requests_router, reference_data_router
@@ -16,4 +17,5 @@ api_router.include_router(reference_data_router)
 api_router.include_router(market_data_router)
 api_router.include_router(valuation_router)
 api_router.include_router(risk_router)
+api_router.include_router(limits_router)
 api_router.include_router(audit_router)

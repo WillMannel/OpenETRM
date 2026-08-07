@@ -1,9 +1,10 @@
+import builtins
 import uuid
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.common.enums import ChangeRequestStatus
+from app.common.enums import LIVE_TRADE_STATUSES, ChangeRequestStatus
 from app.modules.trade_capture.models import Book, Counterparty, Trade, TradeChangeRequest
 
 
@@ -56,6 +57,17 @@ class TradeRepository:
         stmt = select(Trade).order_by(Trade.trade_date.desc()).limit(limit).offset(offset)
         if book_id is not None:
             stmt = stmt.where(Trade.book_id == book_id)
+        result = await self._session.execute(stmt)
+        return list(result.scalars().all())
+
+    async def list_live_for_book(self, book_id: uuid.UUID) -> builtins.list[Trade]:
+        """Trades in a LIVE_TRADE_STATUSES status for this book -- used for pre-trade
+        limit checks, which must reason about the book's economically-live exposure.
+        (Return type is spelled `builtins.list` because this class also defines a
+        method named `list`, which otherwise shadows the builtin generic for mypy.)"""
+        stmt = select(Trade).where(
+            Trade.book_id == book_id, Trade.status.in_([s.value for s in LIVE_TRADE_STATUSES])
+        )
         result = await self._session.execute(stmt)
         return list(result.scalars().all())
 

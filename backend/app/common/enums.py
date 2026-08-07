@@ -23,6 +23,12 @@ class VolumeUnit(str, enum.Enum):
 class TradeType(str, enum.Enum):
     SWAP = "SWAP"
     FORWARD = "FORWARD"
+    OPTION = "OPTION"
+
+
+class OptionType(str, enum.Enum):
+    CALL = "CALL"
+    PUT = "PUT"
 
 
 class BuySell(str, enum.Enum):
@@ -97,6 +103,8 @@ class AuditAction(str, enum.Enum):
     REQUEST_CANCELLATION = "REQUEST_CANCELLATION"
     APPROVE_CHANGE = "APPROVE_CHANGE"
     REJECT_CHANGE = "REJECT_CHANGE"
+    LIMIT_BREACH = "LIMIT_BREACH"
+    ACKNOWLEDGE_LIMIT_BREACH = "ACKNOWLEDGE_LIMIT_BREACH"
 
 
 class ChangeRequestType(str, enum.Enum):
@@ -108,3 +116,17 @@ class ChangeRequestStatus(str, enum.Enum):
     PENDING = "PENDING"
     APPROVED = "APPROVED"
     REJECTED = "REJECTED"
+
+
+class LimitType(str, enum.Enum):
+    """VOLUME: max absolute net volume (per delivery month) a book may hold in a given
+    commodity. VAR: max 1-day VaR (at the limit's configured confidence level) a book
+    may run before it's flagged."""
+
+    VOLUME = "VOLUME"
+    VAR = "VAR"
+
+
+class LimitBreachStatus(str, enum.Enum):
+    OPEN = "OPEN"
+    ACKNOWLEDGED = "ACKNOWLEDGED"

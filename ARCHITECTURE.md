@@ -83,19 +83,27 @@ hardcoded to one commodity, not because oil support is deeply built out).
    lifecycle transition writes to atomically. See "Auth, RBAC & audit trail" below.
 2. **Trade capture & lifecycle** (`modules/trade_capture`) — counterparties, books,
    trades, and a real state machine: capture → confirm → (optionally amend/cancel
-   through four-eyes approval). See "Trade lifecycle" below.
+   through four-eyes approval). See "Trade lifecycle" below. Trades are SWAP, FORWARD,
+   or OPTION (see "Options/optionality" below).
 3. **Market data & curve building** (`modules/market_data`) — seed monthly quotes,
    bootstrap a piecewise-flat forward curve (`curve_builder/bootstrapper.py`)
 4. **Valuation** (`modules/valuation`) — roll *confirmed* trades into net positions per
-   delivery month, mark-to-market against a published curve
+   delivery month, mark-to-market against a published curve; price OPTION trades
+   individually via Black-76
 5. **Risk** (`modules/risk`) — VaR via historical simulation, parametric
    (variance-covariance), or Monte Carlo; a bucketed delta-ladder; stress testing
-   against named shock scenarios; and trade-level P&L attribution (price movement vs.
-   new trade activity) between two dates. See "Risk methodology" below.
+   against named shock scenarios; trade-level P&L attribution (price movement vs.
+   new trade activity) between two dates; and per-trade option greeks. See "Risk
+   methodology" below.
+6. **Position & risk limits** (`modules/limits`) — pre-trade volume limits and
+   post-hoc VaR limits, both book+commodity-scoped. See "Position & risk limits" below.
+7. **Observability** (`app/core/logging.py`, `metrics.py`, `middleware.py`) —
+   structured JSON logs with a per-request correlation id, Prometheus metrics, and a
+   liveness/readiness split. See "Observability" below.
 
 Explicitly **out of scope** for v1 (see `FUTURE_WORK.md` for a design sketch of each):
 full deal settlement/invoicing, regulatory reporting, credit risk/margining, physical
-logistics/scheduling, options/optionality, live market data feeds, multi-tenancy.
+logistics/scheduling, live market data feeds, multi-tenancy.
 
 ### Auth, RBAC & audit trail
 
@@ -162,6 +170,74 @@ construction. It does not currently capture trades cancelled/amended away betwee
 two snapshot dates — see `.../pnl_attribution.py`'s docstring for why (needs a
 historical status snapshot per date, which the data model doesn't have yet).
 
+### Options/optionality
+
+`Trade.trade_type` can be `SWAP`, `FORWARD`, or `OPTION`. An OPTION trade carries
+`option_type` (CALL/PUT), `strike_price`, `premium` (paid/received at `trade_date`),
+and `option_volatility` instead of `fixed_price` (null for OPTION, required for
+SWAP/FORWARD — enforced in `TradeCreate`'s validator, not the DB). `delivery_start_month`
+doubles as the option's expiry convention.
+
+Pricing (`app/modules/valuation/options.py`) is [Black-76](https://en.wikipedia.org/wiki/Black_model)
+— the standard model for options *on a forward/future* rather than spot, which is the
+right convention for a commodity option struck against a delivery-month forward.
+There's no implied-volatility surface in v1: `option_volatility` is a flat number
+captured at trade entry, not derived from market quotes — a documented simplification,
+not a real vol surface (a real one is future work). The risk-free rate is a single flat
+`Settings.risk_free_rate`, not a yield curve.
+
+Because an option's payoff isn't linear in volume the way a swap/forward's is (two
+option trades can carry different strikes/vols), OPTION trades are **excluded** from
+`ValuationService.build_positions`'s net-volume rollup and priced individually instead
+(`price_option_trade`) — each gets its own per-trade `ValuationResult`
+(`trade_id` set, unlike a swap/forward book-level result where it's null). The same
+exclusion applies to VaR/delta-ladder/stress/P&L-attribution, which are net-volume-based
+and would misrepresent an option's exposure if netted linearly. `POST
+/risk/options/greeks` gives per-trade delta/gamma/vega/theta instead.
+
+### Position & risk limits
+
+Two limit types (`modules/limits`), both scoped to a book+commodity, enforced
+differently on purpose:
+
+- **VOLUME** — checked pre-trade, at `POST /trades/{id}/confirm`: if confirming would
+  push the book's net volume (in any delivery month, across its live SWAP/FORWARD
+  trades) past the configured threshold, the confirm is rejected (422) and a
+  `LimitBreach` is recorded. Blocking, because a draft trade doing this is still cheap
+  to fix (amend or don't confirm).
+- **VAR** — checked after `POST /risk/var/run` completes, at a specific confidence
+  level: if the run's `var_value` exceeds the threshold, a `LimitBreach` is recorded
+  and audited, but the run's result is still returned. Never blocking — a risk report
+  must always be able to show an over-limit number, not hide it behind a 4xx.
+
+Both paths write the breach + an `audit_log` entry atomically, the same
+flush-then-commit pattern `TradeCaptureService` established. `GET /limits/breaches`
+lists open breaches; `POST /limits/breaches/{id}/acknowledge` closes one out (with an
+optional note) once a risk manager has reviewed it. `POST /limits` upserts — creating a
+second limit of the same (book, commodity, limit_type) updates the existing row's
+threshold rather than stacking duplicates.
+
+### Observability
+
+- **Structured logs** (`app/core/logging.py`): every log line is one JSON object
+  (timestamp, level, logger, message, plus `request_id` when inside a request) instead
+  of the plain-text default — directly parseable by a log aggregator.
+- **Request correlation** (`app/core/middleware.py`): `RequestContextMiddleware`
+  generates (or propagates, via an inbound `X-Request-ID` header) a per-request id,
+  binds it to a `contextvars.ContextVar` so every log call during that request picks it
+  up without threading a request object through every function signature, and echoes
+  it back as a response header.
+- **Metrics** (`app/core/metrics.py`, exposed at `GET /metrics`): Prometheus
+  `http_requests_total{method,path,status_code}` and
+  `http_request_duration_seconds{method,path}`, labeled by the matched route
+  *template* (e.g. `/api/v1/trades/{trade_id}`) rather than the raw path, so per-id
+  cardinality doesn't explode.
+- **Liveness vs. readiness**: `GET /health` checks nothing external — it only proves
+  the process is up, so a slow dependency doesn't make an orchestrator restart a
+  perfectly healthy process. `GET /health/ready` pings Postgres and Redis and returns
+  503 (with a `checks` breakdown of which dependency failed) if either is unreachable —
+  the check a load balancer/readiness probe should actually use.
+
 ### Async job endpoints
 
 Curve build, VaR, and delta-ladder each have a synchronous endpoint (blocks until done —
@@ -199,21 +275,22 @@ details.
 
 ```
 backend/app/
-  core/            settings, DB session, logging, Arq pool
+  core/            settings, DB session, logging, metrics, request middleware, Arq pool
   api/v1/          router aggregation
   modules/
     auth/          users, JWT, RBAC (get_current_user, require_role)
     audit/         generic append-only change log
     trade_capture/ counterparties, books, trades, lifecycle (confirm/amend/cancel)
     market_data/   quotes, curve bootstrap (QuantLib + custom bootstrapper)
-    valuation/     positions, mark-to-market
+    valuation/     positions, mark-to-market, Black-76 option pricing (options.py)
     risk/          VaR (historical/parametric/Monte Carlo), sensitivities, stress
-                    testing, P&L attribution
+                    testing, P&L attribution, option greeks
+    limits/        book+commodity VOLUME/VAR limits and breach tracking
   tasks/           Arq worker + background jobs (curve calibration, VaR runs)
 backend/scripts/   create_admin.py -- bootstrap the first ADMIN user
 backend/tests/     unit tests (pure quant/auth logic) + integration tests (API + in-memory DB)
 frontend/src/
   api/             generated OpenAPI types + typed fetch client
   hooks/           React Query hooks per module
-  pages/           TradeBlotter, CurveViewer, RiskDashboard, Login
+  pages/           TradeBlotter, CurveViewer, RiskDashboard, Limits, Login
 ```

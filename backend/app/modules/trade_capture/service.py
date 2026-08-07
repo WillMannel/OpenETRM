@@ -23,7 +23,9 @@ from app.common.enums import (
     BuySell,
     ChangeRequestStatus,
     ChangeRequestType,
+    Commodity,
     Currency,
+    OptionType,
     TradeStatus,
     TradeType,
     VolumeUnit,
@@ -31,6 +33,7 @@ from app.common.enums import (
 from app.common.exceptions import NotFoundError, ValidationFailedError
 from app.modules.audit.service import record_audit_event
 from app.modules.auth.models import User
+from app.modules.limits.service import LimitService
 from app.modules.trade_capture.models import Book, Counterparty, Trade, TradeChangeRequest
 from app.modules.trade_capture.repository import (
     ReferenceDataRepository,
@@ -44,6 +47,7 @@ from app.modules.trade_capture.schemas import (
     CounterpartyCreate,
     TradeCreate,
 )
+from app.modules.valuation.service import ValuationService
 
 
 def _enum_value(v: Any) -> Any:
@@ -65,14 +69,24 @@ def _trade_snapshot(trade: Trade) -> dict[str, Any]:
         "buy_sell": _enum_value(trade.buy_sell),
         "volume": float(trade.volume),
         "volume_unit": _enum_value(trade.volume_unit),
-        "fixed_price": float(trade.fixed_price),
+        "fixed_price": float(trade.fixed_price) if trade.fixed_price is not None else None,
         "price_currency": _enum_value(trade.price_currency),
         "delivery_start_month": trade.delivery_start_month.isoformat(),
         "delivery_end_month": trade.delivery_end_month.isoformat(),
         "floating_index": trade.floating_index,
+        "option_type": _enum_value(trade.option_type) if trade.option_type else None,
+        "strike_price": float(trade.strike_price) if trade.strike_price is not None else None,
+        "premium": float(trade.premium) if trade.premium is not None else None,
+        "option_volatility": (
+            float(trade.option_volatility) if trade.option_volatility is not None else None
+        ),
         "status": _enum_value(trade.status),
         "version": trade.version,
     }
+
+
+def _optional(coercer: Callable[[Any], Any]) -> Callable[[Any], Any]:
+    return lambda raw: None if raw is None else coercer(raw)
 
 
 _FIELD_COERCERS: dict[str, Callable[[Any], Any]] = {
@@ -80,11 +94,15 @@ _FIELD_COERCERS: dict[str, Callable[[Any], Any]] = {
     "buy_sell": BuySell,
     "volume": float,
     "volume_unit": VolumeUnit,
-    "fixed_price": float,
+    "fixed_price": _optional(float),
     "price_currency": Currency,
     "delivery_start_month": date.fromisoformat,
     "delivery_end_month": date.fromisoformat,
     "floating_index": str,
+    "option_type": _optional(OptionType),
+    "strike_price": _optional(float),
+    "premium": _optional(float),
+    "option_volatility": _optional(float),
 }
 
 
@@ -115,6 +133,7 @@ class TradeCaptureService:
         self._session = session
         self._repo = TradeRepository(session)
         self._change_repo = TradeChangeRequestRepository(session)
+        self._limit_service = LimitService(session)
 
     async def create_trade(self, payload: TradeCreate, actor: User) -> Trade:
         trade = Trade(**payload.model_dump(), created_by_user_id=actor.id)
@@ -146,6 +165,9 @@ class TradeCaptureService:
         trade = await self.get_trade(trade_id)
         if trade.status != TradeStatus.NEW:
             raise ValidationFailedError(f"cannot confirm a trade in status {trade.status}")
+
+        await self._enforce_volume_limit_for_confirm(trade, actor)
+
         before = _trade_snapshot(trade)
         trade.status = TradeStatus.CONFIRMED
         await self._session.flush()
@@ -326,6 +348,21 @@ class TradeCaptureService:
         await self._session.refresh(change_request)
         return change_request
 
+    async def _enforce_volume_limit_for_confirm(self, trade: Trade, actor: User) -> None:
+        """Blocks the confirm if it would push the book's net volume, in any delivery
+        month, past a configured VOLUME limit for this commodity. `trade` is still NEW
+        at this point, so it isn't yet counted by list_live_for_book -- include it
+        explicitly alongside the book's other live trades."""
+        live_trades = await self._repo.list_live_for_book(trade.book_id)
+        positions = ValuationService(self._session).build_positions(
+            [*live_trades, trade], date.today()
+        )
+        prospective_max_abs_volume = max((abs(p.net_volume) for p in positions), default=0.0)
+        commodity = Commodity(_enum_value(trade.commodity))
+        await self._limit_service.enforce_volume_limit(
+            trade.book_id, commodity, prospective_max_abs_volume, date.today(), actor
+        )
+
     def _check_pending_and_four_eyes(self, change_request: TradeChangeRequest, actor: User) -> None:
         if change_request.status != ChangeRequestStatus.PENDING:
             raise ValidationFailedError(f"change request is already {change_request.status}")
@@ -345,6 +382,10 @@ class TradeCaptureService:
             "delivery_start_month": trade.delivery_start_month,
             "delivery_end_month": trade.delivery_end_month,
             "floating_index": trade.floating_index,
+            "option_type": trade.option_type,
+            "strike_price": trade.strike_price,
+            "premium": trade.premium,
+            "option_volatility": trade.option_volatility,
         }
         for field, raw_value in changes.items():
             current[field] = _coerce_amendment_value(field, raw_value)
@@ -355,6 +396,24 @@ class TradeCaptureService:
             raise ValidationFailedError(
                 "delivery_end_month must not be before delivery_start_month"
             )
+        if current["trade_type"] == TradeType.OPTION:
+            missing = [
+                f
+                for f in ("option_type", "strike_price", "premium", "option_volatility")
+                if current[f] is None
+            ]
+            if missing:
+                raise ValidationFailedError(f"OPTION trades require: {sorted(missing)}")
+            if current["fixed_price"] is not None:
+                raise ValidationFailedError("fixed_price does not apply to OPTION trades")
+        else:
+            if current["fixed_price"] is None:
+                raise ValidationFailedError("fixed_price is required for SWAP/FORWARD trades")
+            if any(
+                current[f] is not None
+                for f in ("option_type", "strike_price", "premium", "option_volatility")
+            ):
+                raise ValidationFailedError("option fields may only be set on an OPTION trade")
 
         return Trade(
             trade_date=trade.trade_date,

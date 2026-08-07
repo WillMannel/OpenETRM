@@ -90,3 +90,23 @@ class PnlAttributionResponse(BaseModel):
         description="MTM of trades booked between prior_date and current_date"
     )
     total: float
+
+
+class OptionGreeksRequest(BaseModel):
+    book_id: uuid.UUID
+    as_of_date: date
+    commodity: Commodity = Commodity.HENRY_HUB
+
+
+class OptionGreeksRead(BaseModel):
+    trade_id: uuid.UUID
+    delta: float
+    gamma: float
+    vega: float
+    theta: float
+
+
+class OptionGreeksResponse(BaseModel):
+    book_id: uuid.UUID
+    as_of_date: date
+    results: list[OptionGreeksRead]

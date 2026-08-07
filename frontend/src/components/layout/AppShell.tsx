@@ -66,6 +66,16 @@ export function AppShell() {
                 >
                   Pending Approvals
                 </NavLink>
+                <NavLink
+                  to="/limits"
+                  className={({ isActive }) =>
+                    `text-sm px-3 py-1.5 rounded-md transition-colors ${
+                      isActive ? "bg-slate-800 text-white" : "text-slate-400 hover:text-slate-200"
+                    }`
+                  }
+                >
+                  Limits
+                </NavLink>
               </RoleGate>
             </nav>
             <div className="flex items-center gap-3 text-sm">

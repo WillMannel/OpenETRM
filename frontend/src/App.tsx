@@ -3,6 +3,7 @@ import { Navigate, Route, Routes } from "react-router-dom";
 import { ProtectedRoute } from "./components/auth/ProtectedRoute";
 import { AppShell } from "./components/layout/AppShell";
 import { CurveViewerPage } from "./pages/CurveViewer/CurveViewerPage";
+import { LimitsPage } from "./pages/Limits/LimitsPage";
 import { LoginPage } from "./pages/Login/LoginPage";
 import { PendingApprovalsPage } from "./pages/PendingApprovals/PendingApprovalsPage";
 import { RiskDashboardPage } from "./pages/RiskDashboard/RiskDashboardPage";
@@ -18,6 +19,7 @@ export function App() {
           <Route path="curve" element={<CurveViewerPage />} />
           <Route path="risk" element={<RiskDashboardPage />} />
           <Route path="approvals" element={<PendingApprovalsPage />} />
+          <Route path="limits" element={<LimitsPage />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Route>
       </Route>

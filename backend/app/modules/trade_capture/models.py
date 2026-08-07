@@ -11,6 +11,7 @@ from app.common.enums import (
     ChangeRequestType,
     Commodity,
     Currency,
+    OptionType,
     TradeStatus,
     TradeType,
     VolumeUnit,
@@ -58,7 +59,8 @@ class Trade(Base):
         String(10), nullable=False, default=VolumeUnit.MMBTU
     )
 
-    fixed_price: Mapped[float] = mapped_column(Numeric(18, 6), nullable=False)
+    # Null for OPTION trades (priced off strike_price/premium/option_volatility instead).
+    fixed_price: Mapped[float | None] = mapped_column(Numeric(18, 6), nullable=True)
     price_currency: Mapped[Currency] = mapped_column(
         String(5), nullable=False, default=Currency.USD
     )
@@ -69,6 +71,14 @@ class Trade(Base):
     floating_index: Mapped[str] = mapped_column(
         String(50), nullable=False, default="HENRY_HUB_PENULTIMATE"
     )
+
+    # Populated only for trade_type=OPTION; null for SWAP/FORWARD. See
+    # app.modules.valuation.options for the Black-76 pricer these feed.
+    option_type: Mapped[OptionType | None] = mapped_column(String(10), nullable=True)
+    strike_price: Mapped[float | None] = mapped_column(Numeric(18, 6), nullable=True)
+    premium: Mapped[float | None] = mapped_column(Numeric(18, 6), nullable=True)
+    option_volatility: Mapped[float | None] = mapped_column(Numeric(9, 6), nullable=True)
+
     status: Mapped[TradeStatus] = mapped_column(String(20), nullable=False, default=TradeStatus.NEW)
 
     # Lifecycle/versioning: an approved amendment creates a *new* Trade row (this one

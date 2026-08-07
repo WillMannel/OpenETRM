@@ -9,6 +9,7 @@ export type VarMethod = components["schemas"]["VarMethod"];
 export type DeltaLadder = components["schemas"]["DeltaLadderRead"];
 export type StressResult = components["schemas"]["StressResultRead"];
 export type PnlAttribution = components["schemas"]["PnlAttributionResponse"];
+export type OptionGreeks = components["schemas"]["OptionGreeksRead"];
 
 export function useRunVar() {
   return useMutation({
@@ -53,6 +54,18 @@ export function useRunStressTest() {
   return useMutation({
     mutationFn: async (params: { bookId: string; asOfDate: string; commodity: Commodity }) => {
       const { data, error } = await apiClient.POST("/api/v1/risk/stress-test", {
+        body: { book_id: params.bookId, as_of_date: params.asOfDate, commodity: params.commodity },
+      });
+      if (error) throw error;
+      return data;
+    },
+  });
+}
+
+export function useOptionGreeks() {
+  return useMutation({
+    mutationFn: async (params: { bookId: string; asOfDate: string; commodity: Commodity }) => {
+      const { data, error } = await apiClient.POST("/api/v1/risk/options/greeks", {
         body: { book_id: params.bookId, as_of_date: params.asOfDate, commodity: params.commodity },
       });
       if (error) throw error;

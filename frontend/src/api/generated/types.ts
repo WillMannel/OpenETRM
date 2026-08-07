@@ -539,6 +539,75 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/risk/options/greeks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Run Option Greeks */
+        post: operations["run_option_greeks_api_v1_risk_options_greeks_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/limits": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Limits */
+        get: operations["list_limits_api_v1_limits_get"];
+        put?: never;
+        /** Create Or Update Limit */
+        post: operations["create_or_update_limit_api_v1_limits_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/limits/breaches": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Open Breaches */
+        get: operations["list_open_breaches_api_v1_limits_breaches_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/limits/breaches/{breach_id}/acknowledge": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Acknowledge Breach */
+        post: operations["acknowledge_breach_api_v1_limits_breaches__breach_id__acknowledge_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/audit/{entity_type}/{entity_id}": {
         parameters: {
             query?: never;
@@ -563,8 +632,52 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Health */
+        /**
+         * Health
+         * @description Liveness: the process is up and serving requests. Deliberately checks nothing
+         *     external -- a slow/down dependency should surface on /health/ready, not make the
+         *     orchestrator think the process itself needs restarting.
+         */
         get: operations["health_health_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/health/ready": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Readiness
+         * @description Readiness: can this instance actually serve traffic right now? Pings Postgres
+         *     and Redis; either being unreachable flips the response to 503 without raising, so
+         *     the body always reports which dependency failed.
+         */
+        get: operations["readiness_health_ready_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/metrics": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Metrics */
+        get: operations["metrics_metrics_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -577,6 +690,11 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /** AcknowledgeBreachRequest */
+        AcknowledgeBreachRequest: {
+            /** Note */
+            note?: string | null;
+        };
         /** AdminUserCreate */
         AdminUserCreate: {
             /** Username */
@@ -640,6 +758,55 @@ export interface components {
             name: string;
             /** Description */
             description?: string | null;
+        };
+        /** BookLimitCreate */
+        BookLimitCreate: {
+            /**
+             * Book Id
+             * Format: uuid
+             */
+            book_id: string;
+            /** @default HENRY_HUB */
+            commodity: components["schemas"]["Commodity"];
+            limit_type: components["schemas"]["LimitType"];
+            /** Threshold */
+            threshold: number;
+            /**
+             * Confidence Level
+             * @default 95
+             */
+            confidence_level: number;
+        };
+        /** BookLimitRead */
+        BookLimitRead: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Book Id
+             * Format: uuid
+             */
+            book_id: string;
+            commodity: components["schemas"]["Commodity"];
+            limit_type: components["schemas"]["LimitType"];
+            /** Threshold */
+            threshold: number;
+            /** Confidence Level */
+            confidence_level: number;
+            /** Created By User Id */
+            created_by_user_id: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
         };
         /** BookPnlSummary */
         BookPnlSummary: {
@@ -838,6 +1005,58 @@ export interface components {
             /** Result */
             result?: unknown | null;
         };
+        /** LimitBreachRead */
+        LimitBreachRead: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Limit Id
+             * Format: uuid
+             */
+            limit_id: string;
+            /**
+             * Book Id
+             * Format: uuid
+             */
+            book_id: string;
+            commodity: components["schemas"]["Commodity"];
+            limit_type: components["schemas"]["LimitType"];
+            /** Threshold */
+            threshold: number;
+            /** Observed Value */
+            observed_value: number;
+            /**
+             * As Of Date
+             * Format: date
+             */
+            as_of_date: string;
+            status: components["schemas"]["LimitBreachStatus"];
+            /**
+             * Occurred At
+             * Format: date-time
+             */
+            occurred_at: string;
+            /** Acknowledged By User Id */
+            acknowledged_by_user_id: string | null;
+            /** Acknowledged At */
+            acknowledged_at: string | null;
+        };
+        /**
+         * LimitBreachStatus
+         * @enum {string}
+         */
+        LimitBreachStatus: "OPEN" | "ACKNOWLEDGED";
+        /**
+         * LimitType
+         * @description VOLUME: max absolute net volume (per delivery month) a book may hold in a given
+         *     commodity. VAR: max 1-day VaR (at the limit's configured confidence level) a book
+         *     may run before it's flagged.
+         * @enum {string}
+         */
+        LimitType: "VOLUME" | "VAR";
         /** LoginRequest */
         LoginRequest: {
             /** Username */
@@ -891,6 +1110,57 @@ export interface components {
          * @enum {string}
          */
         MarketDataSource: "SEED" | "MANUAL";
+        /** OptionGreeksRead */
+        OptionGreeksRead: {
+            /**
+             * Trade Id
+             * Format: uuid
+             */
+            trade_id: string;
+            /** Delta */
+            delta: number;
+            /** Gamma */
+            gamma: number;
+            /** Vega */
+            vega: number;
+            /** Theta */
+            theta: number;
+        };
+        /** OptionGreeksRequest */
+        OptionGreeksRequest: {
+            /**
+             * Book Id
+             * Format: uuid
+             */
+            book_id: string;
+            /**
+             * As Of Date
+             * Format: date
+             */
+            as_of_date: string;
+            /** @default HENRY_HUB */
+            commodity: components["schemas"]["Commodity"];
+        };
+        /** OptionGreeksResponse */
+        OptionGreeksResponse: {
+            /**
+             * Book Id
+             * Format: uuid
+             */
+            book_id: string;
+            /**
+             * As Of Date
+             * Format: date
+             */
+            as_of_date: string;
+            /** Results */
+            results: components["schemas"]["OptionGreeksRead"][];
+        };
+        /**
+         * OptionType
+         * @enum {string}
+         */
+        OptionType: "CALL" | "PUT";
         /** PnlAttributionRequest */
         PnlAttributionRequest: {
             /**
@@ -1099,7 +1369,7 @@ export interface components {
             /** @default MMBTU */
             volume_unit: components["schemas"]["VolumeUnit"];
             /** Fixed Price */
-            fixed_price: number;
+            fixed_price?: number | null;
             /** @default USD */
             price_currency: components["schemas"]["Currency"];
             /**
@@ -1117,6 +1387,13 @@ export interface components {
              * @default HENRY_HUB_PENULTIMATE
              */
             floating_index: string;
+            option_type?: components["schemas"]["OptionType"] | null;
+            /** Strike Price */
+            strike_price?: number | null;
+            /** Premium */
+            premium?: number | null;
+            /** Option Volatility */
+            option_volatility?: number | null;
         };
         /** TradeRead */
         TradeRead: {
@@ -1139,7 +1416,7 @@ export interface components {
             volume: number;
             volume_unit: components["schemas"]["VolumeUnit"];
             /** Fixed Price */
-            fixed_price: number;
+            fixed_price: number | null;
             price_currency: components["schemas"]["Currency"];
             /**
              * Delivery Start Month
@@ -1153,6 +1430,13 @@ export interface components {
             delivery_end_month: string;
             /** Floating Index */
             floating_index: string;
+            option_type: components["schemas"]["OptionType"] | null;
+            /** Strike Price */
+            strike_price: number | null;
+            /** Premium */
+            premium: number | null;
+            /** Option Volatility */
+            option_volatility: number | null;
             status: components["schemas"]["TradeStatus"];
             /** Version */
             version: number;
@@ -1185,7 +1469,7 @@ export interface components {
          * TradeType
          * @enum {string}
          */
-        TradeType: "SWAP" | "FORWARD";
+        TradeType: "SWAP" | "FORWARD" | "OPTION";
         /** UserRead */
         UserRead: {
             /**
@@ -2365,6 +2649,169 @@ export interface operations {
             };
         };
     };
+    run_option_greeks_api_v1_risk_options_greeks_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OptionGreeksRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OptionGreeksResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_limits_api_v1_limits_get: {
+        parameters: {
+            query?: {
+                book_id?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BookLimitRead"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_or_update_limit_api_v1_limits_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BookLimitCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BookLimitRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_open_breaches_api_v1_limits_breaches_get: {
+        parameters: {
+            query?: {
+                book_id?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LimitBreachRead"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    acknowledge_breach_api_v1_limits_breaches__breach_id__acknowledge_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                breach_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AcknowledgeBreachRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LimitBreachRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     get_audit_history_api_v1_audit__entity_type___entity_id__get: {
         parameters: {
             query?: never;
@@ -2415,6 +2862,48 @@ export interface operations {
                     "application/json": {
                         [key: string]: string;
                     };
+                };
+            };
+        };
+    };
+    readiness_health_ready_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    metrics_metrics_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
                 };
             };
         };

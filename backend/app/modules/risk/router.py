@@ -15,6 +15,9 @@ from app.modules.risk.models import VarResult
 from app.modules.risk.schemas import (
     DeltaLadderRead,
     DeltaLadderRunRequest,
+    OptionGreeksRead,
+    OptionGreeksRequest,
+    OptionGreeksResponse,
     PnlAttributionRequest,
     PnlAttributionResponse,
     SensitivityResultRead,
@@ -48,6 +51,7 @@ async def run_var(
         int(payload.confidence_level),
         payload.scenario_window_days,
         payload.method,
+        actor=_actor,
     )
     return VarResultRead.model_validate(result)
 
@@ -193,4 +197,34 @@ async def run_pnl_attribution(
         price_effect=attribution.price_effect,
         new_trade_effect=attribution.new_trade_effect,
         total=attribution.total,
+    )
+
+
+@router.post("/options/greeks", response_model=OptionGreeksResponse)
+async def run_option_greeks(
+    payload: OptionGreeksRequest,
+    session: AsyncSession = Depends(get_db),
+    _actor: User = Depends(_RISK_OR_ADMIN),
+) -> OptionGreeksResponse:
+    service = RiskService(session)
+    try:
+        greeks_by_trade = await service.compute_option_greeks(
+            payload.book_id, payload.as_of_date, payload.commodity
+        )
+    except NotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    return OptionGreeksResponse(
+        book_id=payload.book_id,
+        as_of_date=payload.as_of_date,
+        results=[
+            OptionGreeksRead(
+                trade_id=trade.id,
+                delta=greeks.delta,
+                gamma=greeks.gamma,
+                vega=greeks.vega,
+                theta=greeks.theta,
+            )
+            for trade, greeks in greeks_by_trade
+        ],
     )

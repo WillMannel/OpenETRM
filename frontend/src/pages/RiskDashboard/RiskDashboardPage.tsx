@@ -5,6 +5,7 @@ import { RoleGate } from "../../components/auth/RoleGate";
 import { useBookPnl } from "../../hooks/usePositions";
 import {
   useDeltaLadder,
+  useOptionGreeks,
   useRunPnlAttribution,
   useRunStressTest,
   useRunVar,
@@ -31,6 +32,7 @@ export function RiskDashboardPage() {
   const runVar = useRunVar();
   const runStressTest = useRunStressTest();
   const runPnlAttribution = useRunPnlAttribution();
+  const optionGreeks = useOptionGreeks();
   const [varMethod, setVarMethod] = useState<VarMethod>("HISTORICAL_SIM");
   const [priorDate, setPriorDate] = useState("");
 
@@ -158,6 +160,46 @@ export function RiskDashboardPage() {
                   <dd>{money(runPnlAttribution.data.total)}</dd>
                 </div>
               </dl>
+            )}
+          </div>
+
+          <div className="bg-slate-900/50 border border-slate-800 rounded-lg p-4">
+            <div className="flex items-center justify-between">
+              <h2 className="text-sm uppercase tracking-wide text-slate-500">Option greeks</h2>
+              <button
+                className="bg-slate-700 hover:bg-slate-600 text-xs px-3 py-1 rounded-md disabled:opacity-50"
+                disabled={optionGreeks.isPending}
+                onClick={() => optionGreeks.mutate({ bookId, asOfDate, commodity })}
+              >
+                {optionGreeks.isPending ? "Running…" : "Run"}
+              </button>
+            </div>
+            {optionGreeks.data && optionGreeks.data.results.length === 0 && (
+              <p className="text-xs text-slate-500 mt-3">No live OPTION trades in this book.</p>
+            )}
+            {optionGreeks.data && optionGreeks.data.results.length > 0 && (
+              <table className="w-full text-xs mt-3">
+                <thead>
+                  <tr className="text-left text-slate-500 border-b border-slate-900">
+                    <th className="py-1">Trade</th>
+                    <th className="py-1 text-right">Delta</th>
+                    <th className="py-1 text-right">Gamma</th>
+                    <th className="py-1 text-right">Vega</th>
+                    <th className="py-1 text-right">Theta</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {optionGreeks.data.results.map((g) => (
+                    <tr key={g.trade_id} className="border-b border-slate-900">
+                      <td className="py-1 text-slate-400">{g.trade_id.slice(0, 8)}…</td>
+                      <td className="py-1 text-right">{g.delta.toFixed(3)}</td>
+                      <td className="py-1 text-right">{g.gamma.toFixed(4)}</td>
+                      <td className="py-1 text-right">{g.vega.toFixed(2)}</td>
+                      <td className="py-1 text-right">{g.theta.toFixed(2)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             )}
           </div>
         </div>

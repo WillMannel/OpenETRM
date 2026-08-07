@@ -17,6 +17,10 @@ class Settings(BaseSettings):
     # v1's pilot commodity; Commodity.WTI exists too, to prove the enum isn't hardcoded.
     pilot_commodity: str = "HENRY_HUB"
 
+    # Flat risk-free rate used to discount option cash flows (Black-76). No real yield
+    # curve in v1 -- see ARCHITECTURE.md.
+    risk_free_rate: float = 0.05
+
     log_level: str = "INFO"
 
     # Auth. jwt_secret_key MUST be overridden via env var in any real deployment --

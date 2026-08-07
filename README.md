@@ -10,16 +10,21 @@ was chosen.
 ## What's here (v1)
 
 A vertical slice for two pilot commodities — **Henry Hub natural gas** and **WTI
-crude oil** — financial swaps/forwards:
+crude oil** — covering swaps, forwards, and options:
 
 - Auth (JWT), RBAC (VIEWER/TRADER/RISK_MANAGER/ADMIN), and an audit trail on every
   trade lifecycle transition
 - Trade capture with a real lifecycle: capture → confirm → amend/cancel through
-  four-eyes approval
+  four-eyes approval, for swaps/forwards *and* options (Black-76 pricing, per-trade
+  greeks)
 - Market data seeding + monthly forward curve bootstrapping
 - Mark-to-market valuation and P&L by book
 - Risk: VaR (historical simulation, parametric, or Monte Carlo), a bucketed
-  delta-ladder, stress testing, and P&L attribution
+  delta-ladder, stress testing, P&L attribution, and option greeks
+- Position/risk limits: pre-trade volume limits (blocking) and VaR limits (alerting),
+  with breach tracking and acknowledgement
+- Observability: structured JSON logs with per-request correlation ids, Prometheus
+  metrics (`/metrics`), and a liveness/readiness health split
 
 See `ARCHITECTURE.md` for the details and `FUTURE_WORK.md` for what's deliberately out
 of scope (regulatory reporting, credit/margining, settlement/invoicing, logistics).

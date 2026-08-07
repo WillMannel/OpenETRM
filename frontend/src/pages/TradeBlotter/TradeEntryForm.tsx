@@ -36,6 +36,10 @@ export function TradeEntryForm({ counterparties, books }: Props) {
     fixedPrice: "3.00",
     deliveryStartMonth: "",
     deliveryEndMonth: "",
+    optionType: "CALL" as NonNullable<TradeCreate["option_type"]>,
+    strikePrice: "3.00",
+    premium: "0.20",
+    optionVolatility: "0.35",
   });
   const [newCounterpartyName, setNewCounterpartyName] = useState("");
   const [newBookName, setNewBookName] = useState("");
@@ -43,6 +47,8 @@ export function TradeEntryForm({ counterparties, books }: Props) {
   function update<K extends keyof typeof form>(key: K, value: (typeof form)[K]) {
     setForm((prev) => ({ ...prev, [key]: value }));
   }
+
+  const isOption = form.tradeType === "OPTION";
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -58,11 +64,21 @@ export function TradeEntryForm({ counterparties, books }: Props) {
       buy_sell: form.buySell,
       volume: Number(form.volume),
       volume_unit: commodity === "WTI" ? "BBL" : "MMBTU",
-      fixed_price: Number(form.fixedPrice),
       price_currency: "USD",
       floating_index: FLOATING_INDEX_BY_COMMODITY[commodity] ?? "HENRY_HUB_PENULTIMATE",
       delivery_start_month: form.deliveryStartMonth,
       delivery_end_month: form.deliveryEndMonth,
+      // OPTION is priced off strike/premium/vol, not fixed_price -- the backend
+      // rejects whichever set doesn't match trade_type, so only send one.
+      ...(isOption
+        ? {
+            fixed_price: null,
+            option_type: form.optionType,
+            strike_price: Number(form.strikePrice),
+            premium: Number(form.premium),
+            option_volatility: Number(form.optionVolatility),
+          }
+        : { fixed_price: Number(form.fixedPrice) }),
     });
   }
 
@@ -112,6 +128,7 @@ export function TradeEntryForm({ counterparties, books }: Props) {
           <select className={inputClass} value={form.tradeType} onChange={(e) => update("tradeType", e.target.value as TradeCreate["trade_type"])}>
             <option value="SWAP">Swap</option>
             <option value="FORWARD">Forward</option>
+            <option value="OPTION">Option</option>
           </select>
         </div>
         <div>
@@ -125,20 +142,49 @@ export function TradeEntryForm({ counterparties, books }: Props) {
           <label className="text-xs text-slate-400">Volume ({commodity === "WTI" ? "bbl" : "MMBtu"})</label>
           <input className={inputClass} value={form.volume} onChange={(e) => update("volume", e.target.value)} required />
         </div>
+        {!isOption && (
+          <div>
+            <label className="text-xs text-slate-400">
+              Fixed price (${commodity === "WTI" ? "/bbl" : "/MMBtu"})
+            </label>
+            <input className={inputClass} value={form.fixedPrice} onChange={(e) => update("fixedPrice", e.target.value)} required />
+          </div>
+        )}
         <div>
-          <label className="text-xs text-slate-400">
-            Fixed price (${commodity === "WTI" ? "/bbl" : "/MMBtu"})
-          </label>
-          <input className={inputClass} value={form.fixedPrice} onChange={(e) => update("fixedPrice", e.target.value)} required />
-        </div>
-        <div>
-          <label className="text-xs text-slate-400">Delivery start month</label>
+          <label className="text-xs text-slate-400">Delivery start month (= option expiry, for OPTION)</label>
           <input type="date" className={inputClass} value={form.deliveryStartMonth} onChange={(e) => update("deliveryStartMonth", e.target.value)} required />
         </div>
         <div>
           <label className="text-xs text-slate-400">Delivery end month</label>
           <input type="date" className={inputClass} value={form.deliveryEndMonth} onChange={(e) => update("deliveryEndMonth", e.target.value)} required />
         </div>
+        {isOption && (
+          <>
+            <div>
+              <label className="text-xs text-slate-400">Call / Put</label>
+              <select
+                className={inputClass}
+                value={form.optionType}
+                onChange={(e) => update("optionType", e.target.value as typeof form.optionType)}
+              >
+                <option value="CALL">Call</option>
+                <option value="PUT">Put</option>
+              </select>
+            </div>
+            <div>
+              <label className="text-xs text-slate-400">Strike price</label>
+              <input className={inputClass} value={form.strikePrice} onChange={(e) => update("strikePrice", e.target.value)} required />
+            </div>
+            <div>
+              <label className="text-xs text-slate-400">Premium (per unit)</label>
+              <input className={inputClass} value={form.premium} onChange={(e) => update("premium", e.target.value)} required />
+            </div>
+            <div>
+              <label className="text-xs text-slate-400">Volatility (flat, annualized)</label>
+              <input className={inputClass} value={form.optionVolatility} onChange={(e) => update("optionVolatility", e.target.value)} required />
+            </div>
+          </>
+        )}
 
         <div className="col-span-2 flex items-center gap-3 mt-1">
           <button
