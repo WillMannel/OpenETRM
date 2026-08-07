@@ -1,12 +1,12 @@
 import logging
 
+import redis.asyncio as redis_asyncio
 from fastapi import FastAPI, Response
 from sqlalchemy import text
+from sqlalchemy.ext.asyncio import create_async_engine
 
 from app.api.v1.router import api_router
 from app.core.config import get_settings
-from app.core.db import engine
-from app.core.jobs import get_arq_pool
 from app.core.logging import configure_logging
 from app.core.metrics import render_metrics
 from app.core.middleware import RequestContextMiddleware
@@ -32,27 +32,41 @@ async def health() -> dict[str, str]:
 async def readiness(response: Response) -> dict[str, object]:
     """Readiness: can this instance actually serve traffic right now? Pings Postgres
     and Redis; either being unreachable flips the response to 503 without raising, so
-    the body always reports which dependency failed."""
+    the body always reports which dependency failed.
+
+    Deliberately does *not* reuse the app's shared engine (app.core.db.engine) or Arq
+    pool (app.core.jobs.get_arq_pool) -- both cache a connection pool at module scope
+    for the process's one long-lived event loop, which is right for request handling
+    but wrong for a probe: a short-lived throwaway connection here means a real
+    network problem is always caught fresh, and it avoids ever handing a pooled
+    connection from *this* check to a future request on a different event loop (bit
+    us for real under pytest-asyncio's per-test-function event loops, where the shared
+    engine was getting reused across tests each on their own loop)."""
     checks: dict[str, str] = {}
     healthy = True
 
+    probe_engine = create_async_engine(settings.database_url)
     try:
-        async with engine.connect() as conn:
+        async with probe_engine.connect() as conn:
             await conn.execute(text("SELECT 1"))
         checks["database"] = "ok"
     except Exception as exc:
         healthy = False
         checks["database"] = f"error: {exc}"
         logger.warning("readiness check: database unreachable: %s", exc)
+    finally:
+        await probe_engine.dispose()
 
+    redis_client = redis_asyncio.from_url(settings.redis_url)
     try:
-        pool = await get_arq_pool()
-        await pool.ping()
+        await redis_client.ping()
         checks["redis"] = "ok"
     except Exception as exc:
         healthy = False
         checks["redis"] = f"error: {exc}"
         logger.warning("readiness check: redis unreachable: %s", exc)
+    finally:
+        await redis_client.aclose()
 
     if not healthy:
         response.status_code = 503
