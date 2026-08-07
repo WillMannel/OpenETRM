@@ -14,10 +14,16 @@ class Settings(BaseSettings):
     database_url: str = "postgresql+asyncpg://openetrm:openetrm@localhost:5432/openetrm"
     redis_url: str = "redis://localhost:6379/0"
 
-    # v1 is deliberately single-commodity; this is the only value in use today.
+    # v1's pilot commodity; Commodity.WTI exists too, to prove the enum isn't hardcoded.
     pilot_commodity: str = "HENRY_HUB"
 
     log_level: str = "INFO"
+
+    # Auth. jwt_secret_key MUST be overridden via env var in any real deployment --
+    # the default here is only so local dev/tests work out of the box.
+    jwt_secret_key: str = "dev-only-insecure-secret-change-me"
+    jwt_algorithm: str = "HS256"
+    jwt_access_token_expire_minutes: int = 60 * 8
 
 
 @lru_cache

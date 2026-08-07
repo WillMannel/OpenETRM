@@ -14,8 +14,10 @@ from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_arq_pool
+from app.common.enums import UserRole
 from app.main import app
 from app.modules.trade_capture.models import Book, Counterparty
+from tests.conftest import AuthHeadersFactory
 
 
 @dataclass
@@ -52,9 +54,15 @@ async def _seed_book_and_counterparty(db_session: AsyncSession) -> tuple[str, st
 
 @pytest.mark.asyncio
 async def test_build_curve_async_enqueues_calibrate_curve_job(
-    client: AsyncClient, db_session: AsyncSession, fake_arq_pool: _FakeArqPool
+    client: AsyncClient,
+    db_session: AsyncSession,
+    fake_arq_pool: _FakeArqPool,
+    auth_headers: AuthHeadersFactory,
 ):
-    resp = await client.post("/api/v1/curves/build-async", json={"as_of_date": "2026-01-10"})
+    headers = await auth_headers(UserRole.TRADER)
+    resp = await client.post(
+        "/api/v1/curves/build-async", json={"as_of_date": "2026-01-10"}, headers=headers
+    )
 
     assert resp.status_code == 202
     assert resp.json()["job_id"] == "fake-job-1"
@@ -63,13 +71,18 @@ async def test_build_curve_async_enqueues_calibrate_curve_job(
 
 @pytest.mark.asyncio
 async def test_run_var_async_enqueues_run_var_job(
-    client: AsyncClient, db_session: AsyncSession, fake_arq_pool: _FakeArqPool
+    client: AsyncClient,
+    db_session: AsyncSession,
+    fake_arq_pool: _FakeArqPool,
+    auth_headers: AuthHeadersFactory,
 ):
     _, book_id = await _seed_book_and_counterparty(db_session)
+    headers = await auth_headers(UserRole.RISK_MANAGER)
 
     resp = await client.post(
         "/api/v1/risk/var/run-async",
         json={"book_id": book_id, "as_of_date": "2026-01-10", "confidence_level": 99},
+        headers=headers,
     )
 
     assert resp.status_code == 202
@@ -81,9 +94,15 @@ async def test_run_var_async_enqueues_run_var_job(
 
 @pytest.mark.asyncio
 async def test_run_var_async_with_no_book_passes_none(
-    client: AsyncClient, db_session: AsyncSession, fake_arq_pool: _FakeArqPool
+    client: AsyncClient,
+    db_session: AsyncSession,
+    fake_arq_pool: _FakeArqPool,
+    auth_headers: AuthHeadersFactory,
 ):
-    resp = await client.post("/api/v1/risk/var/run-async", json={"as_of_date": "2026-01-10"})
+    headers = await auth_headers(UserRole.RISK_MANAGER)
+    resp = await client.post(
+        "/api/v1/risk/var/run-async", json={"as_of_date": "2026-01-10"}, headers=headers
+    )
 
     assert resp.status_code == 202
     assert fake_arq_pool.calls[0][1][0] is None
@@ -91,13 +110,18 @@ async def test_run_var_async_with_no_book_passes_none(
 
 @pytest.mark.asyncio
 async def test_run_delta_ladder_async_enqueues_sensitivities_job(
-    client: AsyncClient, db_session: AsyncSession, fake_arq_pool: _FakeArqPool
+    client: AsyncClient,
+    db_session: AsyncSession,
+    fake_arq_pool: _FakeArqPool,
+    auth_headers: AuthHeadersFactory,
 ):
     _, book_id = await _seed_book_and_counterparty(db_session)
+    headers = await auth_headers(UserRole.RISK_MANAGER)
 
     resp = await client.post(
         "/api/v1/risk/delta-ladder/run-async",
         json={"book_id": book_id, "as_of_date": "2026-01-10"},
+        headers=headers,
     )
 
     assert resp.status_code == 202

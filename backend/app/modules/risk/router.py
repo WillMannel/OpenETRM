@@ -5,29 +5,41 @@ from arq.connections import ArqRedis
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import get_arq_pool, get_db
-from app.common.enums import Commodity
+from app.api.deps import get_arq_pool, get_current_user, get_db, require_role
+from app.common.enums import Commodity, UserRole
 from app.common.exceptions import NotFoundError
 from app.common.job_schemas import JobEnqueuedRead, JobStatusRead
 from app.core.jobs import get_job_snapshot
+from app.modules.auth.models import User
 from app.modules.risk.models import VarResult
 from app.modules.risk.schemas import (
     DeltaLadderRead,
     DeltaLadderRunRequest,
+    PnlAttributionRequest,
+    PnlAttributionResponse,
     SensitivityResultRead,
+    StressResultRead,
+    StressTestRequest,
+    StressTestResponse,
     VarResultRead,
     VarRunRequest,
 )
 from app.modules.risk.service import RiskService
+from app.modules.risk.var.stress import StressScenario
 
 router = APIRouter(prefix="/risk", tags=["risk"])
 
+_RISK_OR_ADMIN = require_role(UserRole.RISK_MANAGER, UserRole.ADMIN)
+
 
 @router.post("/var/run", response_model=VarResultRead, status_code=201)
-async def run_var(payload: VarRunRequest, session: AsyncSession = Depends(get_db)) -> VarResultRead:
-    """Synchronous VaR run -- fine for v1's small position/history size. See
-    /risk/var/run-async for the background-job version (app.tasks.risk_tasks.run_var_job)
-    once scenario windows/position counts get large enough to matter."""
+async def run_var(
+    payload: VarRunRequest,
+    session: AsyncSession = Depends(get_db),
+    _actor: User = Depends(_RISK_OR_ADMIN),
+) -> VarResultRead:
+    """Synchronous VaR run -- fine at v1's data volumes. See /risk/var/run-async for the
+    background-job version (app.tasks.risk_tasks.run_var_job)."""
     service = RiskService(session)
     result = await service.run_var(
         payload.book_id,
@@ -35,13 +47,16 @@ async def run_var(payload: VarRunRequest, session: AsyncSession = Depends(get_db
         payload.commodity,
         int(payload.confidence_level),
         payload.scenario_window_days,
+        payload.method,
     )
     return VarResultRead.model_validate(result)
 
 
 @router.post("/var/run-async", response_model=JobEnqueuedRead, status_code=202)
 async def run_var_async(
-    payload: VarRunRequest, pool: ArqRedis = Depends(get_arq_pool)
+    payload: VarRunRequest,
+    pool: ArqRedis = Depends(get_arq_pool),
+    _actor: User = Depends(_RISK_OR_ADMIN),
 ) -> JobEnqueuedRead:
     job = await pool.enqueue_job(
         "run_var_job",
@@ -57,14 +72,18 @@ async def run_var_async(
 
 
 @router.get("/var/run-async/{job_id}", response_model=JobStatusRead)
-async def get_var_job(job_id: str, pool: ArqRedis = Depends(get_arq_pool)) -> JobStatusRead:
+async def get_var_job(
+    job_id: str, pool: ArqRedis = Depends(get_arq_pool), _user: User = Depends(get_current_user)
+) -> JobStatusRead:
     snapshot = await get_job_snapshot(pool, job_id)
     return JobStatusRead(job_id=snapshot.job_id, status=snapshot.status, result=snapshot.result)
 
 
 @router.get("/var/{var_result_id}", response_model=VarResultRead)
 async def get_var_result(
-    var_result_id: uuid.UUID, session: AsyncSession = Depends(get_db)
+    var_result_id: uuid.UUID,
+    session: AsyncSession = Depends(get_db),
+    _user: User = Depends(get_current_user),
 ) -> VarResultRead:
     result = await session.get(VarResult, var_result_id)
     if result is None:
@@ -78,6 +97,7 @@ async def get_delta_ladder(
     as_of_date: date,
     commodity: Commodity = Commodity.HENRY_HUB,
     session: AsyncSession = Depends(get_db),
+    _actor: User = Depends(_RISK_OR_ADMIN),
 ) -> DeltaLadderRead:
     """Synchronous delta-ladder run. See /risk/delta-ladder/run-async for the
     background-job version (app.tasks.risk_tasks.run_sensitivities_job)."""
@@ -97,7 +117,9 @@ async def get_delta_ladder(
 
 @router.post("/delta-ladder/run-async", response_model=JobEnqueuedRead, status_code=202)
 async def run_delta_ladder_async(
-    payload: DeltaLadderRunRequest, pool: ArqRedis = Depends(get_arq_pool)
+    payload: DeltaLadderRunRequest,
+    pool: ArqRedis = Depends(get_arq_pool),
+    _actor: User = Depends(_RISK_OR_ADMIN),
 ) -> JobEnqueuedRead:
     job = await pool.enqueue_job(
         "run_sensitivities_job",
@@ -112,7 +134,63 @@ async def run_delta_ladder_async(
 
 @router.get("/delta-ladder/run-async/{job_id}", response_model=JobStatusRead)
 async def get_delta_ladder_job(
-    job_id: str, pool: ArqRedis = Depends(get_arq_pool)
+    job_id: str, pool: ArqRedis = Depends(get_arq_pool), _user: User = Depends(get_current_user)
 ) -> JobStatusRead:
     snapshot = await get_job_snapshot(pool, job_id)
     return JobStatusRead(job_id=snapshot.job_id, status=snapshot.status, result=snapshot.result)
+
+
+@router.post("/stress-test", response_model=StressTestResponse)
+async def run_stress_test(
+    payload: StressTestRequest,
+    session: AsyncSession = Depends(get_db),
+    _actor: User = Depends(_RISK_OR_ADMIN),
+) -> StressTestResponse:
+    service = RiskService(session)
+    scenarios = (
+        [
+            StressScenario(name=s.name, shock_type=s.shock_type, shock_value=s.shock_value)
+            for s in payload.scenarios
+        ]
+        if payload.scenarios is not None
+        else None
+    )
+    try:
+        results = await service.run_stress_test(
+            payload.book_id, payload.as_of_date, payload.commodity, scenarios
+        )
+    except NotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    return StressTestResponse(
+        book_id=payload.book_id,
+        as_of_date=payload.as_of_date,
+        results=[
+            StressResultRead(scenario_name=r.scenario_name, pnl_impact=r.pnl_impact)
+            for r in results
+        ],
+    )
+
+
+@router.post("/pnl-attribution", response_model=PnlAttributionResponse)
+async def run_pnl_attribution(
+    payload: PnlAttributionRequest,
+    session: AsyncSession = Depends(get_db),
+    _actor: User = Depends(_RISK_OR_ADMIN),
+) -> PnlAttributionResponse:
+    service = RiskService(session)
+    try:
+        attribution = await service.compute_pnl_attribution(
+            payload.book_id, payload.prior_date, payload.current_date, payload.commodity
+        )
+    except NotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    return PnlAttributionResponse(
+        book_id=payload.book_id,
+        prior_date=payload.prior_date,
+        current_date=payload.current_date,
+        price_effect=attribution.price_effect,
+        new_trade_effect=attribution.new_trade_effect,
+        total=attribution.total,
+    )

@@ -1,9 +1,19 @@
 import uuid
 from datetime import date, datetime
+from typing import Any
 
-from pydantic import BaseModel, ConfigDict, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from app.common.enums import BuySell, Commodity, Currency, TradeStatus, TradeType, VolumeUnit
+from app.common.enums import (
+    BuySell,
+    ChangeRequestStatus,
+    ChangeRequestType,
+    Commodity,
+    Currency,
+    TradeStatus,
+    TradeType,
+    VolumeUnit,
+)
 
 
 class CounterpartyCreate(BaseModel):
@@ -71,5 +81,60 @@ class TradeRead(BaseModel):
     delivery_end_month: date
     floating_index: str
     status: TradeStatus
+    version: int
+    previous_version_id: uuid.UUID | None
+    created_by_user_id: uuid.UUID | None
     created_at: datetime
     updated_at: datetime
+
+
+# Fields an amendment may change. Deliberately a subset of TradeCreate -- counterparty,
+# book, and commodity are not amendable (those would really be "cancel and rebook").
+_AMENDABLE_FIELDS = {
+    "trade_type",
+    "buy_sell",
+    "volume",
+    "volume_unit",
+    "fixed_price",
+    "price_currency",
+    "delivery_start_month",
+    "delivery_end_month",
+    "floating_index",
+}
+
+
+class AmendmentRequestCreate(BaseModel):
+    changes: dict[str, Any] = Field(min_length=1)
+    reason: str = Field(min_length=1, max_length=1000)
+
+    @model_validator(mode="after")
+    def _check_fields(self) -> "AmendmentRequestCreate":
+        unknown = set(self.changes) - _AMENDABLE_FIELDS
+        if unknown:
+            raise ValueError(
+                f"not amendable: {sorted(unknown)} (allowed: {sorted(_AMENDABLE_FIELDS)})"
+            )
+        return self
+
+
+class CancellationRequestCreate(BaseModel):
+    reason: str = Field(min_length=1, max_length=1000)
+
+
+class ReviewDecision(BaseModel):
+    note: str | None = Field(default=None, max_length=1000)
+
+
+class TradeChangeRequestRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: uuid.UUID
+    trade_id: uuid.UUID
+    change_type: ChangeRequestType
+    status: ChangeRequestStatus
+    proposed_changes: dict[str, Any] | None
+    reason: str
+    requested_by_user_id: uuid.UUID
+    requested_at: datetime
+    reviewed_by_user_id: uuid.UUID | None
+    reviewed_at: datetime | None
+    review_note: str | None

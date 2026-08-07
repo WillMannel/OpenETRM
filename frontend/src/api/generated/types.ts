@@ -4,6 +4,79 @@
  */
 
 export interface paths {
+    "/api/v1/auth/register": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Register */
+        post: operations["register_api_v1_auth_register_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/auth/login": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Login */
+        post: operations["login_api_v1_auth_login_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/auth/me": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Me */
+        get: operations["get_me_api_v1_auth_me_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/auth/users": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Users */
+        get: operations["list_users_api_v1_auth_users_get"];
+        put?: never;
+        /**
+         * Create User
+         * @description Admin-only: create a user with any role. This is how TRADER/RISK_MANAGER/ADMIN
+         *     accounts get provisioned -- self-registration always lands as VIEWER.
+         */
+        post: operations["create_user_api_v1_auth_users_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/trades": {
         parameters: {
             query?: never;
@@ -33,6 +106,125 @@ export interface paths {
         get: operations["get_trade_api_v1_trades__trade_id__get"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/trades/{trade_id}/confirm": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Confirm Trade */
+        post: operations["confirm_trade_api_v1_trades__trade_id__confirm_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/trades/{trade_id}/amendments": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Request Amendment */
+        post: operations["request_amendment_api_v1_trades__trade_id__amendments_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/trades/{trade_id}/cancellations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Request Cancellation */
+        post: operations["request_cancellation_api_v1_trades__trade_id__cancellations_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/trade-change-requests": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Pending Change Requests */
+        get: operations["list_pending_change_requests_api_v1_trade_change_requests_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/trade-change-requests/{change_request_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Change Request */
+        get: operations["get_change_request_api_v1_trade_change_requests__change_request_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/trade-change-requests/{change_request_id}/approve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Approve Change Request */
+        post: operations["approve_change_request_api_v1_trade_change_requests__change_request_id__approve_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/trade-change-requests/{change_request_id}/reject": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Reject Change Request */
+        post: operations["reject_change_request_api_v1_trade_change_requests__change_request_id__reject_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -197,9 +389,8 @@ export interface paths {
         put?: never;
         /**
          * Run Var
-         * @description Synchronous VaR run -- fine for v1's small position/history size. See
-         *     /risk/var/run-async for the background-job version (app.tasks.risk_tasks.run_var_job)
-         *     once scenario windows/position counts get large enough to matter.
+         * @description Synchronous VaR run -- fine at v1's data volumes. See /risk/var/run-async for the
+         *     background-job version (app.tasks.risk_tasks.run_var_job).
          */
         post: operations["run_var_api_v1_risk_var_run_post"];
         delete?: never;
@@ -314,6 +505,57 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/risk/stress-test": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Run Stress Test */
+        post: operations["run_stress_test_api_v1_risk_stress_test_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/risk/pnl-attribution": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Run Pnl Attribution */
+        post: operations["run_pnl_attribution_api_v1_risk_pnl_attribution_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/audit/{entity_type}/{entity_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Audit History */
+        get: operations["get_audit_history_api_v1_audit__entity_type___entity_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/health": {
         parameters: {
             query?: never;
@@ -335,6 +577,63 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /** AdminUserCreate */
+        AdminUserCreate: {
+            /** Username */
+            username: string;
+            /**
+             * Email
+             * Format: email
+             */
+            email: string;
+            /** Password */
+            password: string;
+            /** @default VIEWER */
+            role: components["schemas"]["UserRole"];
+        };
+        /** AmendmentRequestCreate */
+        AmendmentRequestCreate: {
+            /** Changes */
+            changes: {
+                [key: string]: unknown;
+            };
+            /** Reason */
+            reason: string;
+        };
+        /** AuditLogRead */
+        AuditLogRead: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Entity Type */
+            entity_type: string;
+            /**
+             * Entity Id
+             * Format: uuid
+             */
+            entity_id: string;
+            /** Action */
+            action: string;
+            /** Actor User Id */
+            actor_user_id: string | null;
+            /**
+             * Occurred At
+             * Format: date-time
+             */
+            occurred_at: string;
+            /** Before */
+            before: {
+                [key: string]: unknown;
+            } | null;
+            /** After */
+            after: {
+                [key: string]: unknown;
+            } | null;
+            /** Note */
+            note: string | null;
+        };
         /** BookCreate */
         BookCreate: {
             /** Name */
@@ -378,11 +677,26 @@ export interface components {
          * @enum {string}
          */
         BuySell: "BUY" | "SELL";
+        /** CancellationRequestCreate */
+        CancellationRequestCreate: {
+            /** Reason */
+            reason: string;
+        };
+        /**
+         * ChangeRequestStatus
+         * @enum {string}
+         */
+        ChangeRequestStatus: "PENDING" | "APPROVED" | "REJECTED";
+        /**
+         * ChangeRequestType
+         * @enum {string}
+         */
+        ChangeRequestType: "AMENDMENT" | "CANCELLATION";
         /**
          * Commodity
          * @enum {string}
          */
-        Commodity: "HENRY_HUB";
+        Commodity: "HENRY_HUB" | "WTI";
         /**
          * ConfidenceLevel
          * @enum {integer}
@@ -524,6 +838,13 @@ export interface components {
             /** Result */
             result?: unknown | null;
         };
+        /** LoginRequest */
+        LoginRequest: {
+            /** Username */
+            username: string;
+            /** Password */
+            password: string;
+        };
         /** MarketDataPointCreate */
         MarketDataPointCreate: {
             /** @default HENRY_HUB */
@@ -570,6 +891,53 @@ export interface components {
          * @enum {string}
          */
         MarketDataSource: "SEED" | "MANUAL";
+        /** PnlAttributionRequest */
+        PnlAttributionRequest: {
+            /**
+             * Book Id
+             * Format: uuid
+             */
+            book_id: string;
+            /**
+             * Prior Date
+             * Format: date
+             */
+            prior_date: string;
+            /**
+             * Current Date
+             * Format: date
+             */
+            current_date: string;
+            /** @default HENRY_HUB */
+            commodity: components["schemas"]["Commodity"];
+        };
+        /** PnlAttributionResponse */
+        PnlAttributionResponse: {
+            /**
+             * Book Id
+             * Format: uuid
+             */
+            book_id: string;
+            /**
+             * Prior Date
+             * Format: date
+             */
+            prior_date: string;
+            /**
+             * Current Date
+             * Format: date
+             */
+            current_date: string;
+            /** Price Effect */
+            price_effect: number;
+            /**
+             * New Trade Effect
+             * @description MTM of trades booked between prior_date and current_date
+             */
+            new_trade_effect: number;
+            /** Total */
+            total: number;
+        };
         /** PositionRead */
         PositionRead: {
             /**
@@ -593,6 +961,11 @@ export interface components {
              */
             as_of_date: string;
         };
+        /** ReviewDecision */
+        ReviewDecision: {
+            /** Note */
+            note?: string | null;
+        };
         /** SensitivityResultRead */
         SensitivityResultRead: {
             /** Tenor Bucket */
@@ -601,6 +974,104 @@ export interface components {
             delta_value: number;
             /** Bump Size */
             bump_size: number;
+        };
+        /** StressResultRead */
+        StressResultRead: {
+            /** Scenario Name */
+            scenario_name: string;
+            /** Pnl Impact */
+            pnl_impact: number;
+        };
+        /** StressScenarioIn */
+        StressScenarioIn: {
+            /** Name */
+            name: string;
+            /**
+             * Shock Type
+             * @enum {string}
+             */
+            shock_type: "absolute" | "percentage";
+            /** Shock Value */
+            shock_value: number;
+        };
+        /** StressTestRequest */
+        StressTestRequest: {
+            /**
+             * Book Id
+             * Format: uuid
+             */
+            book_id: string;
+            /**
+             * As Of Date
+             * Format: date
+             */
+            as_of_date: string;
+            /** @default HENRY_HUB */
+            commodity: components["schemas"]["Commodity"];
+            /** Scenarios */
+            scenarios?: components["schemas"]["StressScenarioIn"][] | null;
+        };
+        /** StressTestResponse */
+        StressTestResponse: {
+            /**
+             * Book Id
+             * Format: uuid
+             */
+            book_id: string;
+            /**
+             * As Of Date
+             * Format: date
+             */
+            as_of_date: string;
+            /** Results */
+            results: components["schemas"]["StressResultRead"][];
+        };
+        /** TokenResponse */
+        TokenResponse: {
+            /** Access Token */
+            access_token: string;
+            /**
+             * Token Type
+             * @default bearer
+             */
+            token_type: string;
+        };
+        /** TradeChangeRequestRead */
+        TradeChangeRequestRead: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Trade Id
+             * Format: uuid
+             */
+            trade_id: string;
+            change_type: components["schemas"]["ChangeRequestType"];
+            status: components["schemas"]["ChangeRequestStatus"];
+            /** Proposed Changes */
+            proposed_changes: {
+                [key: string]: unknown;
+            } | null;
+            /** Reason */
+            reason: string;
+            /**
+             * Requested By User Id
+             * Format: uuid
+             */
+            requested_by_user_id: string;
+            /**
+             * Requested At
+             * Format: date-time
+             */
+            requested_at: string;
+            /** Reviewed By User Id */
+            reviewed_by_user_id: string | null;
+            /** Reviewed At */
+            reviewed_at: string | null;
+            /** Review Note */
+            review_note: string | null;
         };
         /** TradeCreate */
         TradeCreate: {
@@ -683,6 +1154,12 @@ export interface components {
             /** Floating Index */
             floating_index: string;
             status: components["schemas"]["TradeStatus"];
+            /** Version */
+            version: number;
+            /** Previous Version Id */
+            previous_version_id: string | null;
+            /** Created By User Id */
+            created_by_user_id: string | null;
             /**
              * Created At
              * Format: date-time
@@ -696,14 +1173,65 @@ export interface components {
         };
         /**
          * TradeStatus
+         * @description A trade's lifecycle state. NEW is a draft that doesn't count toward positions
+         *     until CONFIRMED. PENDING_AMENDMENT/PENDING_CANCELLATION trades still count (they're
+         *     economically live until the change is approved or rejected). AMENDED means this row
+         *     has been superseded by a newer version (see Trade.previous_version_id on the new
+         *     row) and no longer counts. CANCELLED trades never count.
          * @enum {string}
          */
-        TradeStatus: "NEW" | "VALIDATED" | "CANCELLED";
+        TradeStatus: "NEW" | "CONFIRMED" | "PENDING_AMENDMENT" | "PENDING_CANCELLATION" | "AMENDED" | "CANCELLED";
         /**
          * TradeType
          * @enum {string}
          */
         TradeType: "SWAP" | "FORWARD";
+        /** UserRead */
+        UserRead: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Username */
+            username: string;
+            /** Email */
+            email: string;
+            role: components["schemas"]["UserRole"];
+            /** Is Active */
+            is_active: boolean;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+        };
+        /**
+         * UserRegister
+         * @description Self-service signup -- always lands as VIEWER. Elevated roles are granted by an
+         *     admin via POST /auth/users, never chosen by the registrant.
+         */
+        UserRegister: {
+            /** Username */
+            username: string;
+            /**
+             * Email
+             * Format: email
+             */
+            email: string;
+            /** Password */
+            password: string;
+        };
+        /**
+         * UserRole
+         * @description VIEWER: read-only. TRADER: capture trades, request amendments/cancellations.
+         *     RISK_MANAGER: everything TRADER can view, run risk, approve/reject change requests
+         *     and confirmations. ADMIN: RISK_MANAGER plus user management. Four-eyes is enforced
+         *     at the service layer (an approver may not be the same user who requested the
+         *     change), not by role alone.
+         * @enum {string}
+         */
+        UserRole: "VIEWER" | "TRADER" | "RISK_MANAGER" | "ADMIN";
         /** ValidationError */
         ValidationError: {
             /** Location */
@@ -717,6 +1245,11 @@ export interface components {
             /** Context */
             ctx?: Record<string, never>;
         };
+        /**
+         * VarMethod
+         * @enum {string}
+         */
+        VarMethod: "HISTORICAL_SIM" | "PARAMETRIC" | "MONTE_CARLO";
         /** VarResultRead */
         VarResultRead: {
             /**
@@ -765,12 +1298,14 @@ export interface components {
              * @default 250
              */
             scenario_window_days: number;
+            /** @default HISTORICAL_SIM */
+            method: components["schemas"]["VarMethod"];
         };
         /**
          * VolumeUnit
          * @enum {string}
          */
-        VolumeUnit: "MMBTU";
+        VolumeUnit: "MMBTU" | "BBL";
     };
     responses: never;
     parameters: never;
@@ -780,6 +1315,145 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+    register_api_v1_auth_register_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UserRegister"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UserRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    login_api_v1_auth_login_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LoginRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TokenResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_me_api_v1_auth_me_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UserRead"];
+                };
+            };
+        };
+    };
+    list_users_api_v1_auth_users_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UserRead"][];
+                };
+            };
+        };
+    };
+    create_user_api_v1_auth_users_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AdminUserCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UserRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     list_trades_api_v1_trades_get: {
         parameters: {
             query?: {
@@ -864,6 +1538,228 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["TradeRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    confirm_trade_api_v1_trades__trade_id__confirm_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                trade_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TradeRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    request_amendment_api_v1_trades__trade_id__amendments_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                trade_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AmendmentRequestCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TradeChangeRequestRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    request_cancellation_api_v1_trades__trade_id__cancellations_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                trade_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CancellationRequestCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TradeChangeRequestRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_pending_change_requests_api_v1_trade_change_requests_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TradeChangeRequestRead"][];
+                };
+            };
+        };
+    };
+    get_change_request_api_v1_trade_change_requests__change_request_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                change_request_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TradeChangeRequestRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    approve_change_request_api_v1_trade_change_requests__change_request_id__approve_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                change_request_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReviewDecision"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TradeChangeRequestRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    reject_change_request_api_v1_trade_change_requests__change_request_id__reject_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                change_request_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReviewDecision"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TradeChangeRequestRead"];
                 };
             };
             /** @description Validation Error */
@@ -1390,6 +2286,104 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["JobStatusRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    run_stress_test_api_v1_risk_stress_test_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["StressTestRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StressTestResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    run_pnl_attribution_api_v1_risk_pnl_attribution_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PnlAttributionRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PnlAttributionResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_audit_history_api_v1_audit__entity_type___entity_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                entity_type: string;
+                entity_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AuditLogRead"][];
                 };
             };
             /** @description Validation Error */

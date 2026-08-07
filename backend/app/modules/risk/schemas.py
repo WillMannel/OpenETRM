@@ -1,9 +1,10 @@
 import uuid
 from datetime import date, datetime
+from typing import Literal
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
-from app.common.enums import Commodity, ConfidenceLevel
+from app.common.enums import Commodity, ConfidenceLevel, VarMethod
 
 
 class VarRunRequest(BaseModel):
@@ -12,6 +13,7 @@ class VarRunRequest(BaseModel):
     commodity: Commodity = Commodity.HENRY_HUB
     confidence_level: ConfidenceLevel = ConfidenceLevel.PCT_95
     scenario_window_days: int = 250
+    method: VarMethod = VarMethod.HISTORICAL_SIM
 
 
 class VarResultRead(BaseModel):
@@ -45,3 +47,46 @@ class DeltaLadderRunRequest(BaseModel):
     book_id: uuid.UUID
     as_of_date: date
     commodity: Commodity = Commodity.HENRY_HUB
+
+
+class StressScenarioIn(BaseModel):
+    name: str
+    shock_type: Literal["absolute", "percentage"]
+    shock_value: float
+
+
+class StressTestRequest(BaseModel):
+    book_id: uuid.UUID
+    as_of_date: date
+    commodity: Commodity = Commodity.HENRY_HUB
+    # None -> the module's DEFAULT_SCENARIOS (a standard +/-10% and +/-$0.50 set).
+    scenarios: list[StressScenarioIn] | None = None
+
+
+class StressResultRead(BaseModel):
+    scenario_name: str
+    pnl_impact: float
+
+
+class StressTestResponse(BaseModel):
+    book_id: uuid.UUID
+    as_of_date: date
+    results: list[StressResultRead]
+
+
+class PnlAttributionRequest(BaseModel):
+    book_id: uuid.UUID
+    prior_date: date
+    current_date: date
+    commodity: Commodity = Commodity.HENRY_HUB
+
+
+class PnlAttributionResponse(BaseModel):
+    book_id: uuid.UUID
+    prior_date: date
+    current_date: date
+    price_effect: float
+    new_trade_effect: float = Field(
+        description="MTM of trades booked between prior_date and current_date"
+    )
+    total: float

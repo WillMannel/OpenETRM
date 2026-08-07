@@ -74,20 +74,93 @@ FastAPI's generated OpenAPI schema produces a typed TS client (`openapi-typescri
 
 ## v1 vertical slice
 
-Pilot commodity: **Henry Hub natural gas** financial swaps/forwards only.
+Pilot commodities: **Henry Hub natural gas** and **WTI crude oil** financial
+swaps/forwards (`Commodity.WTI` exists specifically to prove the platform isn't
+hardcoded to one commodity, not because oil support is deeply built out).
 
-1. **Trade capture** (`modules/trade_capture`) — counterparties, books, and trades
-   (buy/sell, volume, fixed price, delivery month range)
-2. **Market data & curve building** (`modules/market_data`) — seed monthly quotes,
+1. **Auth & audit** (`modules/auth`, `modules/audit`) — JWT auth, RBAC
+   (VIEWER/TRADER/RISK_MANAGER/ADMIN), and an append-only audit log every trade
+   lifecycle transition writes to atomically. See "Auth, RBAC & audit trail" below.
+2. **Trade capture & lifecycle** (`modules/trade_capture`) — counterparties, books,
+   trades, and a real state machine: capture → confirm → (optionally amend/cancel
+   through four-eyes approval). See "Trade lifecycle" below.
+3. **Market data & curve building** (`modules/market_data`) — seed monthly quotes,
    bootstrap a piecewise-flat forward curve (`curve_builder/bootstrapper.py`)
-3. **Valuation** (`modules/valuation`) — roll trades into net positions per delivery
-   month, mark-to-market against a published curve
-4. **Risk** (`modules/risk`) — 1-day historical-simulation VaR and a bucketed
-   delta-ladder (bump-and-revalue sensitivities per tenor)
+4. **Valuation** (`modules/valuation`) — roll *confirmed* trades into net positions per
+   delivery month, mark-to-market against a published curve
+5. **Risk** (`modules/risk`) — VaR via historical simulation, parametric
+   (variance-covariance), or Monte Carlo; a bucketed delta-ladder; stress testing
+   against named shock scenarios; and trade-level P&L attribution (price movement vs.
+   new trade activity) between two dates. See "Risk methodology" below.
 
-Explicitly **out of scope** for v1 (future work, not built): full deal lifecycle
-(confirmations/settlement/invoicing), regulatory reporting, multiple asset classes,
-options/optionality, live market data feeds, auth/multi-tenancy hardening.
+Explicitly **out of scope** for v1 (see `FUTURE_WORK.md` for a design sketch of each):
+full deal settlement/invoicing, regulatory reporting, credit risk/margining, physical
+logistics/scheduling, options/optionality, live market data feeds, multi-tenancy.
+
+### Auth, RBAC & audit trail
+
+JWT bearer auth (`app/modules/auth`), four roles enforced via `require_role(...)` at
+the route level:
+
+| Role | Can do |
+|---|---|
+| VIEWER | Read everything. The default for self-registration (`POST /auth/register`). |
+| TRADER | + capture trades, seed market data, build curves, request amendments/cancellations |
+| RISK_MANAGER | + confirm trades, run risk (VaR/stress/attribution), approve/reject change requests |
+| ADMIN | + provision users with any role (`POST /auth/users`) |
+
+There's no per-book ACL yet — any authenticated user can see any book/trade; the roles
+above gate *actions*, not *visibility*. The first admin is provisioned out-of-band via
+`backend/scripts/create_admin.py` (chicken-and-egg: creating a user with an elevated
+role itself requires an admin caller).
+
+Every trade lifecycle transition (create, confirm, request amendment/cancellation,
+approve/reject) writes an `audit_log` row (`app/modules/audit`) in the *same
+transaction* as the change itself — see `TradeCaptureService`, which flushes the state
+change and the audit entry together before a single commit, so the two can never
+disagree. `GET /audit/{entity_type}/{entity_id}` returns the full history.
+
+### Trade lifecycle
+
+```
+NEW --confirm--> CONFIRMED --request amendment--> PENDING_AMENDMENT --approve--> (old row: AMENDED, new row: CONFIRMED, version+1)
+                     |                                    \--reject--> CONFIRMED
+                     |
+                     +--request cancellation--> PENDING_CANCELLATION --approve--> CANCELLED
+                                                       \--reject--> CONFIRMED
+```
+
+Only `CONFIRMED`/`PENDING_AMENDMENT`/`PENDING_CANCELLATION` trades count toward
+positions/valuation/risk (`common.enums.LIVE_TRADE_STATUSES`) — a draft (`NEW`),
+superseded (`AMENDED`), or `CANCELLED` trade must not move a book's P&L. An approved
+amendment doesn't mutate the trade row in place; it creates a new `Trade` with
+`previous_version_id` pointing at the old one and `version` incremented, so the audit
+log and any past valuation/risk runs still refer to the exact terms that were live at
+the time. Approval enforces **four-eyes**: the approver may not be the same user who
+made the request, checked in `TradeCaptureService._check_pending_and_four_eyes`
+regardless of role (an ADMIN can't self-approve either).
+
+### Risk methodology
+
+`POST /risk/var/run` takes a `method`: `HISTORICAL_SIM` (default, unweighted
+historical simulation — see the original build's notes), `PARAMETRIC`
+(variance-covariance: portfolio variance = wᵀΣw, VaR = z·σ·√horizon — the standard
+delta-normal method, `app/modules/risk/var/parametric.py`), or `MONTE_CARLO` (draws
+scenarios from a multivariate normal fit to historical price changes and takes the
+empirical percentile — `.../monte_carlo.py`; for v1's linear swap/forward payoffs this
+should converge close to parametric VaR, which is a useful built-in sanity check).
+
+`POST /risk/stress-test` applies named shocks (absolute or percentage, a default set
+of ±10%/±$0.50 or a caller-supplied list) to the curve and reports the P&L impact of
+each — a deliberate, not statistically-bounded "what if", unlike VaR
+(`.../stress.py`).
+
+`POST /risk/pnl-attribution` decomposes the change in a book's MTM between two dates
+into price-movement and new-trade effects, computed trade-by-trade (not off the
+position-level average price) so the two effects reconcile to the total by
+construction. It does not currently capture trades cancelled/amended away between the
+two snapshot dates — see `.../pnl_attribution.py`'s docstring for why (needs a
+historical status snapshot per date, which the data model doesn't have yet).
 
 ### Async job endpoints
 
@@ -126,17 +199,21 @@ details.
 
 ```
 backend/app/
-  core/            settings, DB session, logging
+  core/            settings, DB session, logging, Arq pool
   api/v1/          router aggregation
   modules/
-    trade_capture/ counterparties, books, trades
+    auth/          users, JWT, RBAC (get_current_user, require_role)
+    audit/         generic append-only change log
+    trade_capture/ counterparties, books, trades, lifecycle (confirm/amend/cancel)
     market_data/   quotes, curve bootstrap (QuantLib + custom bootstrapper)
     valuation/     positions, mark-to-market
-    risk/          VaR (historical simulation) + sensitivities (delta ladder)
+    risk/          VaR (historical/parametric/Monte Carlo), sensitivities, stress
+                    testing, P&L attribution
   tasks/           Arq worker + background jobs (curve calibration, VaR runs)
-backend/tests/     unit tests (pure quant logic) + integration tests (API + in-memory DB)
+backend/scripts/   create_admin.py -- bootstrap the first ADMIN user
+backend/tests/     unit tests (pure quant/auth logic) + integration tests (API + in-memory DB)
 frontend/src/
   api/             generated OpenAPI types + typed fetch client
   hooks/           React Query hooks per module
-  pages/           TradeBlotter, CurveViewer, RiskDashboard
+  pages/           TradeBlotter, CurveViewer, RiskDashboard, Login
 ```

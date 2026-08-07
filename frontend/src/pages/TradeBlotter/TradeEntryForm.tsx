@@ -1,6 +1,8 @@
 import { useState } from "react";
 
+import { useAuth } from "../../auth/AuthContext";
 import { useCreateBook, useCreateCounterparty } from "../../hooks/useReferenceData";
+import { useSelection } from "../../hooks/useSelection";
 import type { TradeCreate } from "../../hooks/useTrades";
 import { useCreateTrade } from "../../hooks/useTrades";
 
@@ -12,7 +14,14 @@ interface Props {
 const inputClass =
   "bg-slate-900 border border-slate-700 rounded-md px-2 py-1.5 text-sm text-slate-100 w-full";
 
+const FLOATING_INDEX_BY_COMMODITY: Record<string, string> = {
+  HENRY_HUB: "HENRY_HUB_PENULTIMATE",
+  WTI: "WTI_CUSHING",
+};
+
 export function TradeEntryForm({ counterparties, books }: Props) {
+  const { user } = useAuth();
+  const { commodity } = useSelection();
   const createTrade = useCreateTrade();
   const createCounterparty = useCreateCounterparty();
   const createBook = useCreateBook();
@@ -44,23 +53,33 @@ export function TradeEntryForm({ counterparties, books }: Props) {
       trade_date: form.tradeDate,
       counterparty_id: form.counterpartyId,
       book_id: form.bookId,
-      commodity: "HENRY_HUB",
+      commodity,
       trade_type: form.tradeType,
       buy_sell: form.buySell,
       volume: Number(form.volume),
-      volume_unit: "MMBTU",
+      volume_unit: commodity === "WTI" ? "BBL" : "MMBTU",
       fixed_price: Number(form.fixedPrice),
       price_currency: "USD",
-      floating_index: "HENRY_HUB_PENULTIMATE",
+      floating_index: FLOATING_INDEX_BY_COMMODITY[commodity] ?? "HENRY_HUB_PENULTIMATE",
       delivery_start_month: form.deliveryStartMonth,
       delivery_end_month: form.deliveryEndMonth,
     });
   }
 
+  if (user?.role !== "TRADER" && user?.role !== "ADMIN") {
+    return (
+      <p className="text-sm text-slate-500 bg-slate-900/50 border border-slate-800 rounded-lg p-4">
+        Your role ({user?.role}) can view trades but not book new ones.
+      </p>
+    );
+  }
+
   return (
     <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
       <form onSubmit={handleSubmit} className="md:col-span-2 grid grid-cols-2 gap-3 bg-slate-900/50 p-4 rounded-lg border border-slate-800">
-        <label className="col-span-2 text-xs uppercase tracking-wide text-slate-500">New trade</label>
+        <label className="col-span-2 text-xs uppercase tracking-wide text-slate-500">
+          New {commodity === "WTI" ? "WTI" : "Henry Hub"} trade
+        </label>
 
         <div>
           <label className="text-xs text-slate-400">Trade date</label>
@@ -103,11 +122,13 @@ export function TradeEntryForm({ counterparties, books }: Props) {
           </select>
         </div>
         <div>
-          <label className="text-xs text-slate-400">Volume (MMBtu)</label>
+          <label className="text-xs text-slate-400">Volume ({commodity === "WTI" ? "bbl" : "MMBtu"})</label>
           <input className={inputClass} value={form.volume} onChange={(e) => update("volume", e.target.value)} required />
         </div>
         <div>
-          <label className="text-xs text-slate-400">Fixed price ($/MMBtu)</label>
+          <label className="text-xs text-slate-400">
+            Fixed price (${commodity === "WTI" ? "/bbl" : "/MMBtu"})
+          </label>
           <input className={inputClass} value={form.fixedPrice} onChange={(e) => update("fixedPrice", e.target.value)} required />
         </div>
         <div>

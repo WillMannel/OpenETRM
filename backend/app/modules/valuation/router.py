@@ -4,9 +4,10 @@ from datetime import date
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import get_db
+from app.api.deps import get_current_user, get_db
 from app.common.enums import Commodity
 from app.common.exceptions import NotFoundError
+from app.modules.auth.models import User
 from app.modules.valuation.schemas import BookPnlSummary, PositionRead
 from app.modules.valuation.service import ValuationService
 
@@ -19,6 +20,7 @@ async def get_book_pnl(
     as_of_date: date,
     commodity: Commodity = Commodity.HENRY_HUB,
     session: AsyncSession = Depends(get_db),
+    _user: User = Depends(get_current_user),
 ) -> BookPnlSummary:
     service = ValuationService(session)
     try:

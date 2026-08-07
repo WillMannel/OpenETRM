@@ -3,7 +3,8 @@ import uuid
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.modules.trade_capture.models import Book, Counterparty, Trade
+from app.common.enums import ChangeRequestStatus
+from app.modules.trade_capture.models import Book, Counterparty, Trade, TradeChangeRequest
 
 
 class ReferenceDataRepository:
@@ -39,8 +40,10 @@ class TradeRepository:
         self._session = session
 
     async def add(self, trade: Trade) -> Trade:
+        """Flushes, doesn't commit -- callers that also need to write an audit entry
+        atomically alongside the trade (see TradeCaptureService) own the commit."""
         self._session.add(trade)
-        await self._session.commit()
+        await self._session.flush()
         await self._session.refresh(trade, attribute_names=["counterparty", "book"])
         return trade
 
@@ -53,5 +56,31 @@ class TradeRepository:
         stmt = select(Trade).order_by(Trade.trade_date.desc()).limit(limit).offset(offset)
         if book_id is not None:
             stmt = stmt.where(Trade.book_id == book_id)
+        result = await self._session.execute(stmt)
+        return list(result.scalars().all())
+
+
+class TradeChangeRequestRepository:
+    """No auto-commit here (unlike TradeRepository/ReferenceDataRepository) --
+    lifecycle operations touch a change request, the trade(s) it targets, and an audit
+    entry together, and TradeCaptureService owns committing that as one transaction."""
+
+    def __init__(self, session: AsyncSession):
+        self._session = session
+
+    async def add(self, change_request: TradeChangeRequest) -> TradeChangeRequest:
+        self._session.add(change_request)
+        await self._session.flush()
+        return change_request
+
+    async def get(self, change_request_id: uuid.UUID) -> TradeChangeRequest | None:
+        return await self._session.get(TradeChangeRequest, change_request_id)
+
+    async def list_pending(self) -> list[TradeChangeRequest]:
+        stmt = (
+            select(TradeChangeRequest)
+            .where(TradeChangeRequest.status == ChangeRequestStatus.PENDING)
+            .order_by(TradeChangeRequest.requested_at)
+        )
         result = await self._session.execute(stmt)
         return list(result.scalars().all())

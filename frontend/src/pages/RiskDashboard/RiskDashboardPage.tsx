@@ -1,7 +1,15 @@
+import { useState } from "react";
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 
+import { RoleGate } from "../../components/auth/RoleGate";
 import { useBookPnl } from "../../hooks/usePositions";
-import { useDeltaLadder, useRunVar } from "../../hooks/useRisk";
+import {
+  useDeltaLadder,
+  useRunPnlAttribution,
+  useRunStressTest,
+  useRunVar,
+  type VarMethod,
+} from "../../hooks/useRisk";
 import { useSelection } from "../../hooks/useSelection";
 
 function StatTile({ label, value, tone }: { label: string; value: string; tone?: "positive" | "negative" }) {
@@ -14,11 +22,17 @@ function StatTile({ label, value, tone }: { label: string; value: string; tone?:
   );
 }
 
+const money = (v: number) => `$${v.toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
+
 export function RiskDashboardPage() {
-  const { bookId, asOfDate } = useSelection();
-  const pnl = useBookPnl(bookId, asOfDate);
-  const ladder = useDeltaLadder(bookId, asOfDate);
+  const { bookId, asOfDate, commodity } = useSelection();
+  const pnl = useBookPnl(bookId, asOfDate, commodity);
+  const ladder = useDeltaLadder(bookId, asOfDate, commodity);
   const runVar = useRunVar();
+  const runStressTest = useRunStressTest();
+  const runPnlAttribution = useRunPnlAttribution();
+  const [varMethod, setVarMethod] = useState<VarMethod>("HISTORICAL_SIM");
+  const [priorDate, setPriorDate] = useState("");
 
   if (!bookId) {
     return <p className="text-sm text-slate-500">Select a book above to see its risk dashboard.</p>;
@@ -32,24 +46,35 @@ export function RiskDashboardPage() {
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <StatTile
           label="Unrealized P&L"
-          value={`$${totalPnl.toLocaleString(undefined, { maximumFractionDigits: 0 })}`}
+          value={money(totalPnl)}
           tone={totalPnl >= 0 ? "positive" : "negative"}
         />
-        <div className="bg-slate-900/50 border border-slate-800 rounded-lg p-4">
-          <div className="text-xs uppercase tracking-wide text-slate-500">1-day VaR</div>
-          <button
-            className="mt-2 bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-medium px-3 py-1 rounded-md disabled:opacity-50"
-            disabled={runVar.isPending}
-            onClick={() => runVar.mutate({ bookId, asOfDate, confidenceLevel: 95 })}
-          >
-            {runVar.isPending ? "Running…" : "Run 95% VaR"}
-          </button>
-          {runVar.data && (
-            <div className="text-2xl font-semibold mt-2">
-              ${runVar.data.var_value.toLocaleString(undefined, { maximumFractionDigits: 0 })}
+        <RoleGate roles={["RISK_MANAGER", "ADMIN"]}>
+          <div className="bg-slate-900/50 border border-slate-800 rounded-lg p-4">
+            <div className="text-xs uppercase tracking-wide text-slate-500">VaR</div>
+            <div className="flex items-center gap-2 mt-2">
+              <select
+                className="bg-slate-800 border border-slate-700 rounded-md px-2 py-1 text-xs text-slate-100"
+                value={varMethod}
+                onChange={(e) => setVarMethod(e.target.value as VarMethod)}
+              >
+                <option value="HISTORICAL_SIM">Historical sim</option>
+                <option value="PARAMETRIC">Parametric</option>
+                <option value="MONTE_CARLO">Monte Carlo</option>
+              </select>
+              <button
+                className="bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-medium px-3 py-1 rounded-md disabled:opacity-50"
+                disabled={runVar.isPending}
+                onClick={() =>
+                  runVar.mutate({ bookId, asOfDate, commodity, confidenceLevel: 95, method: varMethod })
+                }
+              >
+                {runVar.isPending ? "Running…" : "Run"}
+              </button>
             </div>
-          )}
-        </div>
+            {runVar.data && <div className="text-2xl font-semibold mt-2">{money(runVar.data.var_value)}</div>}
+          </div>
+        </RoleGate>
         <StatTile label="As of" value={asOfDate} />
       </div>
 
@@ -67,6 +92,76 @@ export function RiskDashboardPage() {
           </ResponsiveContainer>
         </div>
       </div>
+
+      <RoleGate roles={["RISK_MANAGER", "ADMIN"]}>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <div className="bg-slate-900/50 border border-slate-800 rounded-lg p-4">
+            <div className="flex items-center justify-between">
+              <h2 className="text-sm uppercase tracking-wide text-slate-500">Stress test</h2>
+              <button
+                className="bg-slate-700 hover:bg-slate-600 text-xs px-3 py-1 rounded-md disabled:opacity-50"
+                disabled={runStressTest.isPending}
+                onClick={() => runStressTest.mutate({ bookId, asOfDate, commodity })}
+              >
+                {runStressTest.isPending ? "Running…" : "Run default scenarios"}
+              </button>
+            </div>
+            {runStressTest.data && (
+              <table className="w-full text-sm mt-3">
+                <tbody>
+                  {runStressTest.data.results.map((r) => (
+                    <tr key={r.scenario_name} className="border-b border-slate-900">
+                      <td className="py-1.5 text-slate-400">{r.scenario_name}</td>
+                      <td className={`py-1.5 text-right ${r.pnl_impact >= 0 ? "text-emerald-400" : "text-red-400"}`}>
+                        {money(r.pnl_impact)}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
+
+          <div className="bg-slate-900/50 border border-slate-800 rounded-lg p-4">
+            <h2 className="text-sm uppercase tracking-wide text-slate-500">P&L attribution</h2>
+            <div className="flex items-center gap-2 mt-2">
+              <input
+                type="date"
+                className="bg-slate-800 border border-slate-700 rounded-md px-2 py-1 text-xs text-slate-100"
+                value={priorDate}
+                onChange={(e) => setPriorDate(e.target.value)}
+                placeholder="Prior date"
+              />
+              <span className="text-xs text-slate-500">→ {asOfDate}</span>
+              <button
+                className="bg-slate-700 hover:bg-slate-600 text-xs px-3 py-1 rounded-md disabled:opacity-50"
+                disabled={runPnlAttribution.isPending || !priorDate}
+                onClick={() =>
+                  runPnlAttribution.mutate({ bookId, priorDate, currentDate: asOfDate, commodity })
+                }
+              >
+                {runPnlAttribution.isPending ? "Running…" : "Run"}
+              </button>
+            </div>
+            {runPnlAttribution.data && (
+              <dl className="mt-3 text-sm space-y-1">
+                <div className="flex justify-between">
+                  <dt className="text-slate-400">Price effect</dt>
+                  <dd>{money(runPnlAttribution.data.price_effect)}</dd>
+                </div>
+                <div className="flex justify-between">
+                  <dt className="text-slate-400">New trade effect</dt>
+                  <dd>{money(runPnlAttribution.data.new_trade_effect)}</dd>
+                </div>
+                <div className="flex justify-between font-semibold border-t border-slate-800 pt-1">
+                  <dt>Total</dt>
+                  <dd>{money(runPnlAttribution.data.total)}</dd>
+                </div>
+              </dl>
+            )}
+          </div>
+        </div>
+      </RoleGate>
 
       <div>
         <h2 className="text-sm uppercase tracking-wide text-slate-500 mb-2">Positions by delivery month</h2>

@@ -1,11 +1,17 @@
 import { createContext, useContext } from "react";
 
-/** Shared "which book / as-of date am I looking at" state, so the Blotter, Curve
- * Viewer, and Risk Dashboard pages stay in sync without prop-drilling or a router
- * query-string scheme -- overkill for a 3-page v1 slice. */
+import type { components } from "../api/generated/types";
+
+export type Commodity = components["schemas"]["Commodity"];
+
+/** Shared "which book / commodity / as-of date am I looking at" state, so the Blotter,
+ * Curve Viewer, and Risk Dashboard pages stay in sync without prop-drilling or a router
+ * query-string scheme -- overkill for a handful of pages. */
 export interface SelectionState {
   bookId: string | undefined;
   setBookId: (id: string | undefined) => void;
+  commodity: Commodity;
+  setCommodity: (commodity: Commodity) => void;
   asOfDate: string;
   setAsOfDate: (date: string) => void;
 }

@@ -8,26 +8,17 @@ swap/forward, i.e. the standard fixed-for-floating settlement payoff.
 
 import uuid
 from collections import defaultdict
-from datetime import date, timedelta
+from datetime import date
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.common.enums import BuySell, Commodity
+from app.common.dates import month_range
+from app.common.enums import LIVE_TRADE_STATUSES, BuySell, Commodity
 from app.common.exceptions import NotFoundError
 from app.modules.market_data.repository import MarketDataRepository
 from app.modules.trade_capture.models import Trade
 from app.modules.valuation.models import Position, ValuationResult
-
-
-def _month_range(start: date, end: date) -> list[date]:
-    months = []
-    cursor = start.replace(day=1)
-    end_marker = end.replace(day=1)
-    while cursor <= end_marker:
-        months.append(cursor)
-        cursor = (cursor.replace(day=28) + timedelta(days=4)).replace(day=1)
-    return months
 
 
 class ValuationService:
@@ -36,14 +27,19 @@ class ValuationService:
         self._market_data_repo = MarketDataRepository(session)
 
     async def _trades_for_book(self, book_id: uuid.UUID) -> list[Trade]:
-        result = await self._session.execute(select(Trade).where(Trade.book_id == book_id))
+        """Only LIVE_TRADE_STATUSES count -- a draft (NEW), superseded (AMENDED), or
+        CANCELLED trade must not move a position or a book's P&L."""
+        stmt = select(Trade).where(
+            Trade.book_id == book_id, Trade.status.in_([s.value for s in LIVE_TRADE_STATUSES])
+        )
+        result = await self._session.execute(stmt)
         return list(result.scalars().all())
 
     def build_positions(self, trades: list[Trade], as_of_date: date) -> list[Position]:
         """Roll trades up into net volume / average fixed price per delivery month."""
         buckets: dict[date, list[Trade]] = defaultdict(list)
         for trade in trades:
-            for month in _month_range(trade.delivery_start_month, trade.delivery_end_month):
+            for month in month_range(trade.delivery_start_month, trade.delivery_end_month):
                 buckets[month].append(trade)
 
         positions: list[Position] = []

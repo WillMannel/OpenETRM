@@ -1,11 +1,23 @@
 import uuid
 from datetime import date, datetime
 
-from sqlalchemy import Date, DateTime, ForeignKey, Numeric, String, func
+from sqlalchemy import JSON, Date, DateTime, ForeignKey, Integer, Numeric, String, func
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from app.common.enums import BuySell, Commodity, Currency, TradeStatus, TradeType, VolumeUnit
+from app.common.enums import (
+    BuySell,
+    ChangeRequestStatus,
+    ChangeRequestType,
+    Commodity,
+    Currency,
+    TradeStatus,
+    TradeType,
+    VolumeUnit,
+)
 from app.db.base import Base
+
+_JSON = JSON().with_variant(JSONB, "postgresql")
 
 
 class Counterparty(Base):
@@ -59,7 +71,48 @@ class Trade(Base):
     )
     status: Mapped[TradeStatus] = mapped_column(String(20), nullable=False, default=TradeStatus.NEW)
 
+    # Lifecycle/versioning: an approved amendment creates a *new* Trade row (this one
+    # gets marked AMENDED) rather than mutating in place, so the audit log and any past
+    # valuation/risk runs still refer to the exact terms that were live at the time.
+    version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    previous_version_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("trades.id"), nullable=True
+    )
+    created_by_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("users.id"), nullable=True
+    )
+
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
+
+
+class TradeChangeRequest(Base):
+    """A proposed amendment or cancellation, pending four-eyes approval. The requester
+    and the approver must be different users (enforced in the service layer, not here)."""
+
+    __tablename__ = "trade_change_requests"
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    trade_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("trades.id"), nullable=False)
+    change_type: Mapped[ChangeRequestType] = mapped_column(String(20), nullable=False)
+    status: Mapped[ChangeRequestStatus] = mapped_column(
+        String(20), nullable=False, default=ChangeRequestStatus.PENDING
+    )
+
+    # For AMENDMENT: a partial dict of {field: new_value} to apply on approval.
+    # For CANCELLATION: null.
+    proposed_changes: Mapped[dict | None] = mapped_column(_JSON, nullable=True)
+    reason: Mapped[str] = mapped_column(String(1000), nullable=False)
+
+    requested_by_user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id"), nullable=False)
+    requested_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+    reviewed_by_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("users.id"), nullable=True
+    )
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    review_note: Mapped[str | None] = mapped_column(String(1000), nullable=True)
