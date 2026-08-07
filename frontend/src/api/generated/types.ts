@@ -659,6 +659,15 @@ export interface paths {
          * @description Readiness: can this instance actually serve traffic right now? Pings Postgres
          *     and Redis; either being unreachable flips the response to 503 without raising, so
          *     the body always reports which dependency failed.
+         *
+         *     Deliberately does *not* reuse the app's shared engine (app.core.db.engine) or Arq
+         *     pool (app.core.jobs.get_arq_pool) -- both cache a connection pool at module scope
+         *     for the process's one long-lived event loop, which is right for request handling
+         *     but wrong for a probe: a short-lived throwaway connection here means a real
+         *     network problem is always caught fresh, and it avoids ever handing a pooled
+         *     connection from *this* check to a future request on a different event loop (bit
+         *     us for real under pytest-asyncio's per-test-function event loops, where the shared
+         *     engine was getting reused across tests each on their own loop).
          */
         get: operations["readiness_health_ready_get"];
         put?: never;
