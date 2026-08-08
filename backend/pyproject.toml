@@ -23,6 +23,7 @@ dependencies = [
     "pyjwt>=2.9",
     "email-validator>=2.2",
     "prometheus-client>=0.21",
+    "pyarrow>=17.0",
 ]
 
 [project.optional-dependencies]

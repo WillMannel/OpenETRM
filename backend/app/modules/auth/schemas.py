@@ -40,3 +40,33 @@ class LoginRequest(BaseModel):
 class TokenResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"
+
+
+class ApiKeyCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=100)
+    expires_at: datetime | None = None
+
+
+class ApiKeyCreated(BaseModel):
+    """Returned only from the create endpoint -- the one and only time the raw key is
+    ever available. Store it now; it can't be retrieved again, only revoked."""
+
+    id: uuid.UUID
+    name: str
+    key_prefix: str
+    api_key: str
+    expires_at: datetime | None
+    created_at: datetime
+
+
+class ApiKeyRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: uuid.UUID
+    user_id: uuid.UUID
+    name: str
+    key_prefix: str
+    created_by_user_id: uuid.UUID | None
+    created_at: datetime
+    last_used_at: datetime | None
+    expires_at: datetime | None
+    revoked_at: datetime | None

@@ -1,7 +1,9 @@
-"""Password hashing (bcrypt, directly -- no passlib indirection) and JWT
-encode/decode. Kept dependency-free of the rest of the app so it's easy to reason
-about and unit test in isolation."""
+"""Password hashing (bcrypt, directly -- no passlib indirection), JWT encode/decode,
+and API key generation/hashing. Kept dependency-free of the rest of the app so it's
+easy to reason about and unit test in isolation."""
 
+import hashlib
+import secrets
 import uuid
 from datetime import datetime, timedelta, timezone
 
@@ -15,6 +17,8 @@ settings = get_settings()
 
 _JWT_SUBJECT_CLAIM = "sub"
 _JWT_ROLE_CLAIM = "role"
+
+API_KEY_PREFIX = "oetrm_"
 
 
 def hash_password(plain_password: str) -> str:
@@ -38,6 +42,20 @@ def create_access_token(user_id: uuid.UUID, role: UserRole | str) -> str:
         "exp": expires_at,
     }
     return jwt.encode(payload, settings.jwt_secret_key, algorithm=settings.jwt_algorithm)
+
+
+def generate_api_key() -> tuple[str, str, str]:
+    """Returns (full_key, key_prefix, hashed_key). `full_key` is returned to the
+    caller exactly once (at creation) and never stored -- only `hashed_key` (its
+    SHA-256 hex digest) and `key_prefix` (its first 14 characters, for identifying
+    which key is which in a list) are persisted. See ApiKey's docstring for why
+    SHA-256 rather than bcrypt is the right hash here."""
+    full_key = f"{API_KEY_PREFIX}{secrets.token_urlsafe(32)}"
+    return full_key, full_key[:14], hash_api_key(full_key)
+
+
+def hash_api_key(raw_key: str) -> str:
+    return hashlib.sha256(raw_key.encode("utf-8")).hexdigest()
 
 
 class InvalidTokenError(Exception):

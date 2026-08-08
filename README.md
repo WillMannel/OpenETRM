@@ -26,10 +26,14 @@ products (**RECs**, **emissions allowances**):
   with breach tracking and acknowledgement
 - Observability: structured JSON logs with per-request correlation ids, Prometheus
   metrics (`/metrics`), and a liveness/readiness health split
+- Integrations: a read-only reporting-views role for direct BI/pipeline connections
+  (Microsoft Fabric, Power BI, Databricks, Snowflake) and REST bulk-export endpoints
+  (CSV/JSON/Parquet) with API-key auth for service accounts — see `INTEGRATIONS.md`
 
 See `ARCHITECTURE.md` for the details and `FUTURE_WORK.md` for what's deliberately out
 of scope (regulatory reporting, credit/margining, settlement/invoicing, logistics,
-multi-hub/basis power trading, FTRs, behind-the-meter PPA economics).
+multi-hub/basis power trading, FTRs, behind-the-meter PPA economics, outbound
+webhooks, a native OneLake write path).
 
 ## Quickstart
 
@@ -53,6 +57,13 @@ Log in as that admin, then use `POST /auth/users` (or the browser's dev tools /
 To exercise the full flow without the UI: log in, seed a counterparty and book, book a
 trade (TRADER), confirm it (RISK_MANAGER), seed a few market data quotes, build a
 curve, then check `/api/v1/positions/{book_id}/pnl` and run `/api/v1/risk/var/run`.
+
+Connecting a BI/pipeline tool (Fabric, Power BI, Databricks, Snowflake)? See
+`INTEGRATIONS.md`. Quick version:
+
+```bash
+docker compose exec api python scripts/create_reporting_role.py <role_name> <password>
+```
 
 ## Local development
 

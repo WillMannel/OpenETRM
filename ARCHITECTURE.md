@@ -280,6 +280,29 @@ threshold rather than stacking duplicates.
   503 (with a `checks` breakdown of which dependency failed) if either is unreachable —
   the check a load balancer/readiness probe should actually use.
 
+### Integrations
+
+Two read-only paths for getting data into an external BI/pipeline platform (Fabric,
+Power BI, Databricks, Snowflake) — full detail, including per-platform connection
+steps, in `INTEGRATIONS.md`:
+
+- **Direct Postgres connector**: flattened `v_*_flat` reporting views
+  (`alembic/versions/..._reporting_views.py`) plus a least-privilege read-only role
+  (`scripts/create_reporting_role.py`, granting `SELECT` on the views only — never the
+  base tables, which would expose `users.hashed_password`/`api_keys.hashed_key`).
+- **REST export** (`app/modules/export`): `GET /export/{trades,positions,
+  valuation-results,var-results}`, each supporting `format=csv|json|parquet` and (all
+  but positions, which key off `as_of_date` instead) `updated_since` for incremental
+  pulls. Parquet specifically because that's the format Fabric's OneLake speaks.
+
+Both are authenticated the same way as everything else, including **API keys**
+(`app/modules/auth`: `ApiKey`, SHA-256-hashed since it's a high-entropy random token
+rather than a human password — see `ApiKey`'s docstring) for service accounts that
+shouldn't need an interactive login flow: `get_current_user` accepts either a JWT
+bearer token or an `X-API-Key` header, resolving an API key to its associated
+service-account `User` so every existing RBAC rule applies unchanged. Admin-only
+`POST /auth/users/{id}/api-keys` mints one; the raw key is returned exactly once.
+
 ### Async job endpoints
 
 Curve build, VaR, and delta-ladder each have a synchronous endpoint (blocks until done —
@@ -328,11 +351,13 @@ backend/app/
     risk/          VaR (historical/parametric/Monte Carlo), sensitivities, stress
                     testing, P&L attribution, option greeks
     limits/        book+commodity VOLUME/VAR limits and breach tracking
+    export/        bulk CSV/JSON/Parquet extracts for BI/pipeline tools
   tasks/           Arq worker + background jobs (curve calibration, VaR runs)
 backend/scripts/   create_admin.py -- bootstrap the first ADMIN user
+                   create_reporting_role.py -- bootstrap a read-only BI/pipeline role
 backend/tests/     unit tests (pure quant/auth logic) + integration tests (API + in-memory DB)
 frontend/src/
   api/             generated OpenAPI types + typed fetch client
   hooks/           React Query hooks per module
-  pages/           TradeBlotter, CurveViewer, RiskDashboard, Limits, Login
+  pages/           TradeBlotter, CurveViewer, RiskDashboard, Limits, ApiKeys, Login
 ```

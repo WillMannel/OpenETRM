@@ -7,9 +7,12 @@ import pytest
 from app.common.enums import UserRole
 from app.core.config import get_settings
 from app.modules.auth.security import (
+    API_KEY_PREFIX,
     InvalidTokenError,
     create_access_token,
     decode_access_token,
+    generate_api_key,
+    hash_api_key,
     hash_password,
     verify_password,
 )
@@ -70,3 +73,29 @@ def test_decode_access_token_rejects_wrong_signature():
 
     with pytest.raises(InvalidTokenError):
         decode_access_token(tampered)
+
+
+def test_generate_api_key_returns_a_prefixed_key_matching_its_own_hash():
+    full_key, key_prefix, hashed_key = generate_api_key()
+
+    assert full_key.startswith(API_KEY_PREFIX)
+    assert key_prefix == full_key[:14]
+    assert hashed_key == hash_api_key(full_key)
+
+
+def test_generate_api_key_is_never_the_same_twice():
+    first, _, _ = generate_api_key()
+    second, _, _ = generate_api_key()
+    assert first != second
+
+
+def test_hash_api_key_does_not_store_plaintext():
+    full_key, _, hashed_key = generate_api_key()
+    assert hashed_key != full_key
+
+
+def test_hash_api_key_is_deterministic():
+    # Unlike bcrypt-hashed passwords (salted, non-deterministic), API key hashing must
+    # be deterministic -- verifying a presented key means hashing it and doing an exact
+    # lookup, not iterating every stored key through a slow compare.
+    assert hash_api_key("oetrm_same-input") == hash_api_key("oetrm_same-input")

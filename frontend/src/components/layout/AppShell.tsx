@@ -77,6 +77,18 @@ export function AppShell() {
                   Limits
                 </NavLink>
               </RoleGate>
+              <RoleGate roles={["ADMIN"]}>
+                <NavLink
+                  to="/api-keys"
+                  className={({ isActive }) =>
+                    `text-sm px-3 py-1.5 rounded-md transition-colors ${
+                      isActive ? "bg-slate-800 text-white" : "text-slate-400 hover:text-slate-200"
+                    }`
+                  }
+                >
+                  API Keys
+                </NavLink>
+              </RoleGate>
             </nav>
             <div className="flex items-center gap-3 text-sm">
               <label className="flex items-center gap-2 text-slate-400">

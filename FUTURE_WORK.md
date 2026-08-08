@@ -15,7 +15,10 @@ platform broadened into power (POWER commodity, peak/off-peak blocks) and
 environmental certificates (REC, EMISSIONS_ALLOWANCE) -- each of those three is a real
 gap specifically for a power-trading desk that this repeats the same honesty about:
 sketched, not built, because getting them wrong (bad FTR settlement math, a basis
-model that silently mis-prices real risk) is worse than not having them.
+model that silently mis-prices real risk) is worse than not having them. Section 8 was
+added once external-system integration (`INTEGRATIONS.md`: a direct-connect reporting
+role and REST export endpoints) landed -- it covers what a *tighter* Fabric/pipeline
+integration still needs on top of that.
 
 ## 1. Regulatory Reporting
 
@@ -191,12 +194,46 @@ metering data feed (utility/ISO settlement data, or the asset's own SCADA/meteri
 system) to be anything more than a stub -- same "needs a specific integration" caveat
 as sections 1 and 5.
 
+## 8. Outbound webhooks and a native OneLake write path
+
+**Scope**: `INTEGRATIONS.md` covers two pull-based integration paths today (a
+direct-connect read-only Postgres role, and REST export endpoints). Both need an
+external system to ask; neither pushes. Two real improvements on top of that:
+
+- **Outbound webhooks**: on a trade lifecycle event (the same set `modules/audit`
+  already captures -- CREATE, CONFIRM, APPROVE_CHANGE, ...), POST a payload to one or
+  more subscriber-configured URLs. This is what would let Fabric's Eventstream or Data
+  Activator react to a trade in near-real-time instead of a pipeline polling
+  `/export/trades?updated_since=...` on a schedule.
+- **A native OneLake write path**: instead of waiting for a Fabric pipeline to pull
+  from `/export/*`, have this service itself write Parquet directly to a OneLake
+  ADLS Gen2 endpoint on a schedule (an Arq job, following the pattern
+  `app/tasks/` already establishes) -- push instead of pull.
+
+**Where they'd attach**: webhooks need a new `modules/webhooks` module (subscription
+CRUD -- URL, event types, an HMAC signing secret for the receiver to verify
+authenticity -- plus a delivery worker with retry/backoff, since a subscriber's
+endpoint being briefly down shouldn't drop the event) hooking into the same point
+`record_audit_event` already does. The OneLake writer would extend
+`app.modules.export` with a scheduled job instead of an on-demand endpoint, using
+Azure's ADLS Gen2 SDK against OneLake's endpoint and a service principal.
+
+**Sizing**: webhooks are a moderate, well-scoped effort with a clear existing hook
+point (audit events) -- the main correctness-sensitive piece is delivery
+reliability (retries, dead-lettering, signature verification), not the event
+detection itself. The OneLake writer is smaller in code but the one item on this
+entire list that's fundamentally untestable without a real Fabric workspace and Azure
+AD app registration to authenticate against -- there's no way to responsibly build
+and claim it works without that, so it stays a sketch until someone has one to build
+against.
+
 ## Cross-cutting note
 
-All seven of these want the same two things the rest of the platform already has:
+All eight of these want the same two things the rest of the platform already has:
 **auth/RBAC** (who can approve a margin call, submit a regulatory report, confirm a
-nomination, or book an FTR position -- reuse `require_role`) and **an audit trail**
-(reuse `app.modules.audit.service.record_audit_event`, following the same "audit entry
+nomination, book an FTR position, or manage a webhook subscription -- reuse
+`require_role`) and **an audit trail** (reuse
+`app.modules.audit.service.record_audit_event`, following the same "audit entry
 commits atomically with the change" pattern `TradeCaptureService` establishes).
 Building on those foundations rather than inventing parallel ones is the main
 architectural payoff of having built auth/audit first.

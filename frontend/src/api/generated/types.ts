@@ -77,6 +77,47 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/auth/users/{user_id}/api-keys": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Api Keys */
+        get: operations["list_api_keys_api_v1_auth_users__user_id__api_keys_get"];
+        put?: never;
+        /**
+         * Create Api Key
+         * @description Admin-only: mint a machine-to-machine credential for a service-account User
+         *     (provision the user via POST /auth/users first -- typically VIEWER, for a
+         *     read-only BI/pipeline integration). `api_key` in the response is the raw key --
+         *     it's shown here exactly once and cannot be retrieved again, only revoked.
+         */
+        post: operations["create_api_key_api_v1_auth_users__user_id__api_keys_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/auth/api-keys/{api_key_id}/revoke": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Revoke Api Key */
+        post: operations["revoke_api_key_api_v1_auth_api_keys__api_key_id__revoke_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/trades": {
         parameters: {
             query?: never;
@@ -625,6 +666,74 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/export/trades": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Export Trades */
+        get: operations["export_trades_api_v1_export_trades_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/export/positions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Export Positions */
+        get: operations["export_positions_api_v1_export_positions_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/export/valuation-results": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Export Valuation Results */
+        get: operations["export_valuation_results_api_v1_export_valuation_results_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/export/var-results": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Export Var Results */
+        get: operations["export_var_results_api_v1_export_var_results_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/health": {
         parameters: {
             query?: never;
@@ -726,6 +835,68 @@ export interface components {
             };
             /** Reason */
             reason: string;
+        };
+        /** ApiKeyCreate */
+        ApiKeyCreate: {
+            /** Name */
+            name: string;
+            /** Expires At */
+            expires_at?: string | null;
+        };
+        /**
+         * ApiKeyCreated
+         * @description Returned only from the create endpoint -- the one and only time the raw key is
+         *     ever available. Store it now; it can't be retrieved again, only revoked.
+         */
+        ApiKeyCreated: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Name */
+            name: string;
+            /** Key Prefix */
+            key_prefix: string;
+            /** Api Key */
+            api_key: string;
+            /** Expires At */
+            expires_at: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+        };
+        /** ApiKeyRead */
+        ApiKeyRead: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * User Id
+             * Format: uuid
+             */
+            user_id: string;
+            /** Name */
+            name: string;
+            /** Key Prefix */
+            key_prefix: string;
+            /** Created By User Id */
+            created_by_user_id: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Last Used At */
+            last_used_at: string | null;
+            /** Expires At */
+            expires_at: string | null;
+            /** Revoked At */
+            revoked_at: string | null;
         };
         /** AuditLogRead */
         AuditLogRead: {
@@ -1753,6 +1924,103 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["UserRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_api_keys_api_v1_auth_users__user_id__api_keys_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                user_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiKeyRead"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_api_key_api_v1_auth_users__user_id__api_keys_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                user_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ApiKeyCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiKeyCreated"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    revoke_api_key_api_v1_auth_api_keys__api_key_id__revoke_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                api_key_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiKeyRead"];
                 };
             };
             /** @description Validation Error */
@@ -2859,6 +3127,146 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AuditLogRead"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    export_trades_api_v1_export_trades_get: {
+        parameters: {
+            query?: {
+                format?: "csv" | "json" | "parquet";
+                book_id?: string | null;
+                updated_since?: string | null;
+                limit?: number;
+                offset?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    export_positions_api_v1_export_positions_get: {
+        parameters: {
+            query: {
+                as_of_date: string;
+                format?: "csv" | "json" | "parquet";
+                book_id?: string | null;
+                limit?: number;
+                offset?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    export_valuation_results_api_v1_export_valuation_results_get: {
+        parameters: {
+            query?: {
+                format?: "csv" | "json" | "parquet";
+                book_id?: string | null;
+                updated_since?: string | null;
+                limit?: number;
+                offset?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    export_var_results_api_v1_export_var_results_get: {
+        parameters: {
+            query?: {
+                format?: "csv" | "json" | "parquet";
+                book_id?: string | null;
+                updated_since?: string | null;
+                limit?: number;
+                offset?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
                 };
             };
             /** @description Validation Error */
