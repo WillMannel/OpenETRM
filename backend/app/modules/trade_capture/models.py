@@ -12,6 +12,7 @@ from app.common.enums import (
     Commodity,
     Currency,
     OptionType,
+    PowerBlock,
     TradeStatus,
     TradeType,
     VolumeUnit,
@@ -78,6 +79,16 @@ class Trade(Base):
     strike_price: Mapped[float | None] = mapped_column(Numeric(18, 6), nullable=True)
     premium: Mapped[float | None] = mapped_column(Numeric(18, 6), nullable=True)
     option_volatility: Mapped[float | None] = mapped_column(Numeric(9, 6), nullable=True)
+
+    # Populated only for commodity=POWER; null otherwise. See common.enums.PowerBlock.
+    power_block: Mapped[PowerBlock | None] = mapped_column(String(10), nullable=True)
+
+    # Populated only for trade_type in (REC, EMISSIONS_ALLOWANCE); null otherwise.
+    # certificate_registry is free text (e.g. "WREGIS", "NEPOOL-GIS", "PJM-GATS", "RGGI") rather
+    # than an enum -- which registries/programs matter is deployment-specific and
+    # growing the list shouldn't need a migration.
+    certificate_registry: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    vintage_year: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
     status: Mapped[TradeStatus] = mapped_column(String(20), nullable=False, default=TradeStatus.NEW)
 

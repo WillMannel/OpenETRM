@@ -17,6 +17,22 @@ const inputClass =
 const FLOATING_INDEX_BY_COMMODITY: Record<string, string> = {
   HENRY_HUB: "HENRY_HUB_PENULTIMATE",
   WTI: "WTI_CUSHING",
+  COAL: "API2_ROTTERDAM",
+  POWER: "ISO_HUB_DA",
+};
+
+const VOLUME_UNIT_BY_COMMODITY: Record<string, TradeCreate["volume_unit"]> = {
+  HENRY_HUB: "MMBTU",
+  WTI: "BBL",
+  COAL: "METRIC_TON",
+  POWER: "MWH",
+};
+
+const VOLUME_UNIT_LABEL: Record<string, string> = {
+  MMBTU: "MMBtu",
+  BBL: "bbl",
+  METRIC_TON: "metric tons",
+  MWH: "MWh",
 };
 
 export function TradeEntryForm({ counterparties, books }: Props) {
@@ -40,6 +56,9 @@ export function TradeEntryForm({ counterparties, books }: Props) {
     strikePrice: "3.00",
     premium: "0.20",
     optionVolatility: "0.35",
+    powerBlock: "ON_PEAK" as NonNullable<TradeCreate["power_block"]>,
+    certificateRegistry: "WREGIS",
+    vintageYear: String(new Date().getFullYear()),
   });
   const [newCounterpartyName, setNewCounterpartyName] = useState("");
   const [newBookName, setNewBookName] = useState("");
@@ -49,6 +68,9 @@ export function TradeEntryForm({ counterparties, books }: Props) {
   }
 
   const isOption = form.tradeType === "OPTION";
+  const isCertificate = form.tradeType === "REC" || form.tradeType === "EMISSIONS_ALLOWANCE";
+  const isPowerDeliveryProduct = commodity === "POWER" && !isCertificate;
+  const volumeUnit = VOLUME_UNIT_BY_COMMODITY[commodity] ?? "MMBTU";
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -63,13 +85,15 @@ export function TradeEntryForm({ counterparties, books }: Props) {
       trade_type: form.tradeType,
       buy_sell: form.buySell,
       volume: Number(form.volume),
-      volume_unit: commodity === "WTI" ? "BBL" : "MMBTU",
+      volume_unit: volumeUnit,
       price_currency: "USD",
       floating_index: FLOATING_INDEX_BY_COMMODITY[commodity] ?? "HENRY_HUB_PENULTIMATE",
       delivery_start_month: form.deliveryStartMonth,
       delivery_end_month: form.deliveryEndMonth,
-      // OPTION is priced off strike/premium/vol, not fixed_price -- the backend
-      // rejects whichever set doesn't match trade_type, so only send one.
+      power_block: isPowerDeliveryProduct ? form.powerBlock : null,
+      // OPTION is priced off strike/premium/vol and REC/EMISSIONS_ALLOWANCE off
+      // certificate_registry/vintage_year, not fixed_price -- the backend rejects
+      // whichever set doesn't match trade_type, so only send the one that applies.
       ...(isOption
         ? {
             fixed_price: null,
@@ -78,7 +102,13 @@ export function TradeEntryForm({ counterparties, books }: Props) {
             premium: Number(form.premium),
             option_volatility: Number(form.optionVolatility),
           }
-        : { fixed_price: Number(form.fixedPrice) }),
+        : isCertificate
+          ? {
+              fixed_price: Number(form.fixedPrice),
+              certificate_registry: form.certificateRegistry,
+              vintage_year: Number(form.vintageYear),
+            }
+          : { fixed_price: Number(form.fixedPrice) }),
     });
   }
 
@@ -94,7 +124,7 @@ export function TradeEntryForm({ counterparties, books }: Props) {
     <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
       <form onSubmit={handleSubmit} className="md:col-span-2 grid grid-cols-2 gap-3 bg-slate-900/50 p-4 rounded-lg border border-slate-800">
         <label className="col-span-2 text-xs uppercase tracking-wide text-slate-500">
-          New {commodity === "WTI" ? "WTI" : "Henry Hub"} trade
+          New {commodity} trade
         </label>
 
         <div>
@@ -129,6 +159,8 @@ export function TradeEntryForm({ counterparties, books }: Props) {
             <option value="SWAP">Swap</option>
             <option value="FORWARD">Forward</option>
             <option value="OPTION">Option</option>
+            <option value="REC">REC (renewable certificate)</option>
+            <option value="EMISSIONS_ALLOWANCE">Emissions allowance</option>
           </select>
         </div>
         <div>
@@ -139,23 +171,39 @@ export function TradeEntryForm({ counterparties, books }: Props) {
           </select>
         </div>
         <div>
-          <label className="text-xs text-slate-400">Volume ({commodity === "WTI" ? "bbl" : "MMBtu"})</label>
+          <label className="text-xs text-slate-400">Volume ({VOLUME_UNIT_LABEL[volumeUnit] ?? volumeUnit})</label>
           <input className={inputClass} value={form.volume} onChange={(e) => update("volume", e.target.value)} required />
         </div>
+        {isPowerDeliveryProduct && (
+          <div>
+            <label className="text-xs text-slate-400">Power block</label>
+            <select
+              className={inputClass}
+              value={form.powerBlock}
+              onChange={(e) => update("powerBlock", e.target.value as typeof form.powerBlock)}
+            >
+              <option value="ON_PEAK">On-peak (5x16)</option>
+              <option value="OFF_PEAK">Off-peak</option>
+              <option value="FLAT">Flat (7x24)</option>
+            </select>
+          </div>
+        )}
         {!isOption && (
           <div>
             <label className="text-xs text-slate-400">
-              Fixed price (${commodity === "WTI" ? "/bbl" : "/MMBtu"})
+              {isCertificate ? "Price (per certificate/allowance)" : `Fixed price ($/${VOLUME_UNIT_LABEL[volumeUnit] ?? volumeUnit})`}
             </label>
             <input className={inputClass} value={form.fixedPrice} onChange={(e) => update("fixedPrice", e.target.value)} required />
           </div>
         )}
         <div>
-          <label className="text-xs text-slate-400">Delivery start month (= option expiry, for OPTION)</label>
+          <label className="text-xs text-slate-400">
+            {isCertificate ? "Vintage period start" : "Delivery start month (= option expiry, for OPTION)"}
+          </label>
           <input type="date" className={inputClass} value={form.deliveryStartMonth} onChange={(e) => update("deliveryStartMonth", e.target.value)} required />
         </div>
         <div>
-          <label className="text-xs text-slate-400">Delivery end month</label>
+          <label className="text-xs text-slate-400">{isCertificate ? "Vintage period end" : "Delivery end month"}</label>
           <input type="date" className={inputClass} value={form.deliveryEndMonth} onChange={(e) => update("deliveryEndMonth", e.target.value)} required />
         </div>
         {isOption && (
@@ -182,6 +230,24 @@ export function TradeEntryForm({ counterparties, books }: Props) {
             <div>
               <label className="text-xs text-slate-400">Volatility (flat, annualized)</label>
               <input className={inputClass} value={form.optionVolatility} onChange={(e) => update("optionVolatility", e.target.value)} required />
+            </div>
+          </>
+        )}
+        {isCertificate && (
+          <>
+            <div>
+              <label className="text-xs text-slate-400">Registry</label>
+              <input
+                className={inputClass}
+                value={form.certificateRegistry}
+                onChange={(e) => update("certificateRegistry", e.target.value)}
+                placeholder="WREGIS, NEPOOL-GIS, RGGI…"
+                required
+              />
+            </div>
+            <div>
+              <label className="text-xs text-slate-400">Vintage year</label>
+              <input className={inputClass} value={form.vintageYear} onChange={(e) => update("vintageYear", e.target.value)} required />
             </div>
           </>
         )}

@@ -872,7 +872,7 @@ export interface components {
          * Commodity
          * @enum {string}
          */
-        Commodity: "HENRY_HUB" | "WTI";
+        Commodity: "HENRY_HUB" | "WTI" | "COAL" | "POWER";
         /**
          * ConfidenceLevel
          * @enum {integer}
@@ -1240,6 +1240,15 @@ export interface components {
              */
             as_of_date: string;
         };
+        /**
+         * PowerBlock
+         * @description The defining characteristic of an OTC power product -- which hours of the day
+         *     the delivery obligation covers. v1 values against the same monthly curve price
+         *     regardless of block (documented simplification: no separate peak/off-peak curves
+         *     yet -- see FUTURE_WORK.md). Only meaningful for Commodity.POWER trades.
+         * @enum {string}
+         */
+        PowerBlock: "ON_PEAK" | "OFF_PEAK" | "FLAT";
         /** ReviewDecision */
         ReviewDecision: {
             /** Note */
@@ -1403,6 +1412,11 @@ export interface components {
             premium?: number | null;
             /** Option Volatility */
             option_volatility?: number | null;
+            power_block?: components["schemas"]["PowerBlock"] | null;
+            /** Certificate Registry */
+            certificate_registry?: string | null;
+            /** Vintage Year */
+            vintage_year?: number | null;
         };
         /** TradeRead */
         TradeRead: {
@@ -1446,6 +1460,11 @@ export interface components {
             premium: number | null;
             /** Option Volatility */
             option_volatility: number | null;
+            power_block: components["schemas"]["PowerBlock"] | null;
+            /** Certificate Registry */
+            certificate_registry: string | null;
+            /** Vintage Year */
+            vintage_year: number | null;
             status: components["schemas"]["TradeStatus"];
             /** Version */
             version: number;
@@ -1478,7 +1497,7 @@ export interface components {
          * TradeType
          * @enum {string}
          */
-        TradeType: "SWAP" | "FORWARD" | "OPTION";
+        TradeType: "SWAP" | "FORWARD" | "OPTION" | "REC" | "EMISSIONS_ALLOWANCE";
         /** UserRead */
         UserRead: {
             /**
@@ -1598,7 +1617,7 @@ export interface components {
          * VolumeUnit
          * @enum {string}
          */
-        VolumeUnit: "MMBTU" | "BBL";
+        VolumeUnit: "MMBTU" | "BBL" | "MWH" | "METRIC_TON";
     };
     responses: never;
     parameters: never;

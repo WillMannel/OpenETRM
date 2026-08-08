@@ -88,6 +88,8 @@ export function AppShell() {
                 >
                   <option value="HENRY_HUB">Henry Hub</option>
                   <option value="WTI">WTI</option>
+                  <option value="COAL">Coal</option>
+                  <option value="POWER">Power</option>
                 </select>
               </label>
               <label className="flex items-center gap-2 text-slate-400">

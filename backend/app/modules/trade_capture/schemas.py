@@ -11,10 +11,13 @@ from app.common.enums import (
     Commodity,
     Currency,
     OptionType,
+    PowerBlock,
     TradeStatus,
     TradeType,
     VolumeUnit,
 )
+
+_CERTIFICATE_TRADE_TYPES = (TradeType.REC, TradeType.EMISSIONS_ALLOWANCE)
 
 
 class CounterpartyCreate(BaseModel):
@@ -65,6 +68,15 @@ class TradeCreate(BaseModel):
     premium: float | None = None
     option_volatility: float | None = None
 
+    # POWER-only. See common.enums.PowerBlock.
+    power_block: PowerBlock | None = None
+
+    # REC / EMISSIONS_ALLOWANCE-only. delivery_start_month/delivery_end_month double
+    # as the vintage (generation/issuance) period rather than a physical delivery
+    # window for these two trade types.
+    certificate_registry: str | None = None
+    vintage_year: int | None = None
+
     @model_validator(mode="after")
     def _check_ranges(self) -> "TradeCreate":
         if self.volume <= 0:
@@ -78,6 +90,11 @@ class TradeCreate(BaseModel):
             "premium": self.premium,
             "option_volatility": self.option_volatility,
         }
+        certificate_fields = {
+            "certificate_registry": self.certificate_registry,
+            "vintage_year": self.vintage_year,
+        }
+
         if self.trade_type == TradeType.OPTION:
             missing = [name for name, value in option_fields.items() if value is None]
             if missing:
@@ -88,11 +105,41 @@ class TradeCreate(BaseModel):
                 raise ValueError("option_volatility must be positive")
             if self.fixed_price is not None:
                 raise ValueError("fixed_price does not apply to OPTION trades")
-        else:
+            if any(v is not None for v in certificate_fields.values()):
+                raise ValueError(
+                    "certificate_registry/vintage_year only apply to REC/EMISSIONS_ALLOWANCE trades"
+                )
+        elif self.trade_type in _CERTIFICATE_TRADE_TYPES:
+            missing = [name for name, value in certificate_fields.items() if value is None]
+            if missing:
+                raise ValueError(f"{self.trade_type.value} trades require: {sorted(missing)}")
             if any(v is not None for v in option_fields.values()):
                 raise ValueError("option fields may only be set on an OPTION trade")
             if self.fixed_price is None:
+                raise ValueError("fixed_price (price per certificate/allowance) is required")
+        else:  # SWAP / FORWARD
+            if any(v is not None for v in option_fields.values()):
+                raise ValueError("option fields may only be set on an OPTION trade")
+            if any(v is not None for v in certificate_fields.values()):
+                raise ValueError(
+                    "certificate_registry/vintage_year only apply to REC/EMISSIONS_ALLOWANCE trades"
+                )
+            if self.fixed_price is None:
                 raise ValueError("fixed_price is required for SWAP/FORWARD trades")
+
+        # power_block describes a delivery obligation, so it only applies to actual
+        # power *delivery* products (SWAP/FORWARD/OPTION) -- not to a REC or emissions
+        # allowance, even when those happen to be booked under commodity=POWER (a REC
+        # represents the environmental attribute of 1 MWh, not a delivery block).
+        is_power_delivery_product = (
+            self.commodity == Commodity.POWER and self.trade_type not in _CERTIFICATE_TRADE_TYPES
+        )
+        if is_power_delivery_product:
+            if self.power_block is None:
+                raise ValueError("power_block is required for POWER SWAP/FORWARD/OPTION trades")
+        elif self.power_block is not None:
+            raise ValueError("power_block only applies to POWER SWAP/FORWARD/OPTION trades")
+
         return self
 
 
@@ -116,6 +163,9 @@ class TradeRead(BaseModel):
     strike_price: float | None
     premium: float | None
     option_volatility: float | None
+    power_block: PowerBlock | None
+    certificate_registry: str | None
+    vintage_year: int | None
     status: TradeStatus
     version: int
     previous_version_id: uuid.UUID | None
@@ -140,6 +190,9 @@ _AMENDABLE_FIELDS = {
     "strike_price",
     "premium",
     "option_volatility",
+    "power_block",
+    "certificate_registry",
+    "vintage_year",
 }
 
 

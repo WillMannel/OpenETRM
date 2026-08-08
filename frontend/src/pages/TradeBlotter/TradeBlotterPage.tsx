@@ -33,6 +33,21 @@ const columnDefs: ColDef<Trade>[] = [
     width: 110,
     valueFormatter: (p) => (p.value == null ? "—" : `$${Number(p.value).toFixed(3)} ${p.data?.option_type ?? ""}`),
   },
+  {
+    field: "power_block",
+    headerName: "Block",
+    width: 100,
+    valueFormatter: (p) => p.value ?? "—",
+  },
+  {
+    valueGetter: (p) =>
+      p.data?.certificate_registry
+        ? `${p.data.certificate_registry} (${p.data.vintage_year ?? "—"})`
+        : null,
+    headerName: "Registry (vintage)",
+    width: 160,
+    valueFormatter: (p) => p.value ?? "—",
+  },
   { field: "delivery_start_month", headerName: "Delivery start", width: 130 },
   { field: "delivery_end_month", headerName: "Delivery end", width: 130 },
   { field: "status", headerName: "Status", width: 150 },

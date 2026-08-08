@@ -1,7 +1,9 @@
-"""Shared enums. v1 originally supported exactly one commodity, one currency, and one
-volume unit -- Commodity now has a second value (WTI) to prove that's a real axis of
-extension rather than a hardcoded assumption. See ARCHITECTURE.md for what's still
-deliberately out of scope."""
+"""Shared enums. Commodity started as one value (HENRY_HUB) to prove the platform
+wasn't hardcoded to it; it now covers the products a power-and-gas trading desk
+actually trades day to day (power, gas, oil, coal) plus two environmental certificate
+products (REC, EMISSIONS_ALLOWANCE) that are captured/lifecycle-managed but not yet
+curve-valued -- see LINEAR_TRADE_TYPES and FUTURE_WORK.md for what's still
+deliberately out of scope (FTRs, multi-hub/basis trading, BTM PPA economics)."""
 
 import enum
 
@@ -9,6 +11,8 @@ import enum
 class Commodity(str, enum.Enum):
     HENRY_HUB = "HENRY_HUB"
     WTI = "WTI"
+    COAL = "COAL"
+    POWER = "POWER"
 
 
 class Currency(str, enum.Enum):
@@ -18,12 +22,38 @@ class Currency(str, enum.Enum):
 class VolumeUnit(str, enum.Enum):
     MMBTU = "MMBTU"
     BBL = "BBL"
+    MWH = "MWH"
+    METRIC_TON = "METRIC_TON"
+
+
+class PowerBlock(str, enum.Enum):
+    """The defining characteristic of an OTC power product -- which hours of the day
+    the delivery obligation covers. v1 values against the same monthly curve price
+    regardless of block (documented simplification: no separate peak/off-peak curves
+    yet -- see FUTURE_WORK.md). Only meaningful for Commodity.POWER trades."""
+
+    ON_PEAK = "ON_PEAK"  # conventionally 5x16: weekday HE7-HE22
+    OFF_PEAK = "OFF_PEAK"  # conventionally 7x8 + weekend/holiday hours
+    FLAT = "FLAT"  # 7x24 / around-the-clock
 
 
 class TradeType(str, enum.Enum):
     SWAP = "SWAP"
     FORWARD = "FORWARD"
     OPTION = "OPTION"
+    REC = "REC"
+    EMISSIONS_ALLOWANCE = "EMISSIONS_ALLOWANCE"
+
+
+LINEAR_TRADE_TYPES = frozenset({TradeType.SWAP, TradeType.FORWARD})
+"""Trade types with a payoff linear in volume, netted into Position by
+ValuationService.build_positions and curve-valued in mark_to_market. OPTION is valued
+individually instead (Black-76, non-linear payoff -- see valuation/options.py).
+REC/EMISSIONS_ALLOWANCE are fully captured and lifecycle-managed (create/confirm/
+amend/cancel/audit/limits) but not yet curve-valued in v1: unlike a delivery-month
+forward curve, there's no natural reference-price time series for a certificate/
+allowance in this platform yet, and fabricating one would be worse than not marking it
+at all. See FUTURE_WORK.md."""
 
 
 class OptionType(str, enum.Enum):

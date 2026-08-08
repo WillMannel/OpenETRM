@@ -13,7 +13,7 @@ from datetime import date
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.common.dates import month_range
-from app.common.enums import BuySell, Commodity, TradeType
+from app.common.enums import LINEAR_TRADE_TYPES, BuySell, Commodity, TradeType
 from app.common.exceptions import NotFoundError
 from app.core.config import get_settings
 from app.modules.market_data.repository import MarketDataRepository
@@ -35,14 +35,16 @@ class ValuationService:
         return await self._trade_repo.list_live(book_id)
 
     def build_positions(self, trades: list[Trade], as_of_date: date) -> list[Position]:
-        """Roll linear (SWAP/FORWARD) trades up into net volume / average fixed price
-        per delivery month. OPTION trades are excluded -- their payoff isn't linear in
-        volume the way a swap/forward's is (different trades can carry different
-        strikes/volatilities), so they're valued individually instead; see
-        price_option_trade / mark_to_market."""
+        """Roll LINEAR_TRADE_TYPES (SWAP/FORWARD) trades up into net volume / average
+        fixed price per delivery month. OPTION trades are excluded -- their payoff
+        isn't linear in volume the way a swap/forward's is (different trades can carry
+        different strikes/volatilities), so they're valued individually instead; see
+        price_option_trade / mark_to_market. REC/EMISSIONS_ALLOWANCE trades are
+        excluded too -- v1 has no curve-based valuation for them at all (see
+        common.enums.LINEAR_TRADE_TYPES)."""
         buckets: dict[date, list[Trade]] = defaultdict(list)
         for trade in trades:
-            if trade.trade_type == TradeType.OPTION:
+            if trade.trade_type not in LINEAR_TRADE_TYPES:
                 continue
             for month in month_range(trade.delivery_start_month, trade.delivery_end_month):
                 buckets[month].append(trade)

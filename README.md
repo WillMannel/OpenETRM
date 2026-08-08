@@ -9,14 +9,15 @@ was chosen.
 
 ## What's here (v1)
 
-A vertical slice for two pilot commodities — **Henry Hub natural gas** and **WTI
-crude oil** — covering swaps, forwards, and options:
+A vertical slice covering **Henry Hub natural gas**, **WTI crude oil**, **coal**, and
+**power** (single-hub, peak/off-peak blocks), plus two environmental certificate
+products (**RECs**, **emissions allowances**):
 
 - Auth (JWT), RBAC (VIEWER/TRADER/RISK_MANAGER/ADMIN), and an audit trail on every
   trade lifecycle transition
 - Trade capture with a real lifecycle: capture → confirm → amend/cancel through
-  four-eyes approval, for swaps/forwards *and* options (Black-76 pricing, per-trade
-  greeks)
+  four-eyes approval, for swaps/forwards, options (Black-76 pricing, per-trade
+  greeks), and vintage-tracked RECs/emissions allowances
 - Market data seeding + monthly forward curve bootstrapping
 - Mark-to-market valuation and P&L by book
 - Risk: VaR (historical simulation, parametric, or Monte Carlo), a bucketed
@@ -27,7 +28,8 @@ crude oil** — covering swaps, forwards, and options:
   metrics (`/metrics`), and a liveness/readiness health split
 
 See `ARCHITECTURE.md` for the details and `FUTURE_WORK.md` for what's deliberately out
-of scope (regulatory reporting, credit/margining, settlement/invoicing, logistics).
+of scope (regulatory reporting, credit/margining, settlement/invoicing, logistics,
+multi-hub/basis power trading, FTRs, behind-the-meter PPA economics).
 
 ## Quickstart
 

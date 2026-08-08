@@ -74,9 +74,12 @@ FastAPI's generated OpenAPI schema produces a typed TS client (`openapi-typescri
 
 ## v1 vertical slice
 
-Pilot commodities: **Henry Hub natural gas** and **WTI crude oil** financial
-swaps/forwards (`Commodity.WTI` exists specifically to prove the platform isn't
-hardcoded to one commodity, not because oil support is deeply built out).
+Commodities: **Henry Hub natural gas**, **WTI crude oil**, **coal**, and **power**
+(single-hub, peak/off-peak block granularity), plus two environmental certificate
+products, **RECs** and **emissions allowances**, that are captured/lifecycle-managed
+but not yet curve-valued. See "Power & environmental products" below and
+`FUTURE_WORK.md` for what a real power desk still needs (multi-hub/basis trading,
+FTRs, BTM PPA economics) that this deliberately doesn't attempt yet.
 
 1. **Auth & audit** (`modules/auth`, `modules/audit`) — JWT auth, RBAC
    (VIEWER/TRADER/RISK_MANAGER/ADMIN), and an append-only audit log every trade
@@ -84,7 +87,8 @@ hardcoded to one commodity, not because oil support is deeply built out).
 2. **Trade capture & lifecycle** (`modules/trade_capture`) — counterparties, books,
    trades, and a real state machine: capture → confirm → (optionally amend/cancel
    through four-eyes approval). See "Trade lifecycle" below. Trades are SWAP, FORWARD,
-   or OPTION (see "Options/optionality" below).
+   OPTION, REC, or EMISSIONS_ALLOWANCE (see "Options/optionality" and "Power &
+   environmental products" below).
 3. **Market data & curve building** (`modules/market_data`) — seed monthly quotes,
    bootstrap a piecewise-flat forward curve (`curve_builder/bootstrapper.py`)
 4. **Valuation** (`modules/valuation`) — roll *confirmed* trades into net positions per
@@ -194,6 +198,44 @@ option trades can carry different strikes/vols), OPTION trades are **excluded** 
 exclusion applies to VaR/delta-ladder/stress/P&L-attribution, which are net-volume-based
 and would misrepresent an option's exposure if netted linearly. `POST
 /risk/options/greeks` gives per-trade delta/gamma/vega/theta instead.
+
+`common.enums.LINEAR_TRADE_TYPES` (`{SWAP, FORWARD}`) is the single source of truth
+for which trade types participate in the net-volume rollup at all — `ValuationService.
+build_positions` and `RiskService`'s P&L-attribution snapshot both filter through it,
+so OPTION and the two certificate trade types below stay excluded consistently rather
+than each call site hardcoding its own check.
+
+### Power & environmental products
+
+`Commodity` now covers `POWER` and `COAL` alongside `HENRY_HUB`/`WTI` — both inherited
+the existing monthly curve/valuation/risk machinery for free (no commodity-specific
+code exists anywhere; adding a `Commodity` value really is just an enum addition, the
+same way `WTI` proved it out originally).
+
+Power carries one more field genuinely specific to it: `Trade.power_block`
+(`ON_PEAK`/`OFF_PEAK`/`FLAT`) — the defining characteristic of an OTC power product,
+required whenever `commodity=POWER` for a SWAP/FORWARD/OPTION. v1 values every block
+against the *same* monthly curve price (a documented simplification — a real desk
+needs separate peak and off-peak curves; see `FUTURE_WORK.md`).
+
+`TradeType.REC` and `TradeType.EMISSIONS_ALLOWANCE` model renewable energy
+certificates and emissions allowances: vintage- and registry-tracked
+(`certificate_registry` — free text, e.g. `WREGIS`, `NEPOOL-GIS`, `RGGI` — rather than
+an enum, since which registries matter is deployment-specific) certificate trades
+priced per-unit (`fixed_price` = $/certificate or $/allowance) instead of against a
+delivery-month curve. They go through the exact same capture → confirm → four-eyes
+amend/cancel → audit lifecycle as every other trade type, including pre-trade VOLUME
+limit checks, but are excluded from `LINEAR_TRADE_TYPES` — v1 has no natural
+reference-price time series for a certificate the way it has a forward curve for gas,
+so it doesn't mark them at all rather than fabricate a number. `delivery_start_month`/
+`delivery_end_month` double as the certificate's vintage (generation/issuance) period
+for these two trade types.
+
+Multi-hub power trading, basis swaps, peak/off-peak-differentiated curves, financial
+transmission rights, and behind-the-meter PPA revenue economics are real remaining
+gaps for a power desk — sketched with concrete architecture in `FUTURE_WORK.md` rather
+than built, since getting FTR settlement math or a basis model wrong is worse than not
+having it.
 
 ### Position & risk limits
 

@@ -26,6 +26,7 @@ from app.common.enums import (
     Commodity,
     Currency,
     OptionType,
+    PowerBlock,
     TradeStatus,
     TradeType,
     VolumeUnit,
@@ -48,6 +49,8 @@ from app.modules.trade_capture.schemas import (
     TradeCreate,
 )
 from app.modules.valuation.service import ValuationService
+
+_CERTIFICATE_TRADE_TYPES = (TradeType.REC, TradeType.EMISSIONS_ALLOWANCE)
 
 
 def _enum_value(v: Any) -> Any:
@@ -80,6 +83,9 @@ def _trade_snapshot(trade: Trade) -> dict[str, Any]:
         "option_volatility": (
             float(trade.option_volatility) if trade.option_volatility is not None else None
         ),
+        "power_block": _enum_value(trade.power_block) if trade.power_block else None,
+        "certificate_registry": trade.certificate_registry,
+        "vintage_year": trade.vintage_year,
         "status": _enum_value(trade.status),
         "version": trade.version,
     }
@@ -103,6 +109,9 @@ _FIELD_COERCERS: dict[str, Callable[[Any], Any]] = {
     "strike_price": _optional(float),
     "premium": _optional(float),
     "option_volatility": _optional(float),
+    "power_block": _optional(PowerBlock),
+    "certificate_registry": _optional(str),
+    "vintage_year": _optional(int),
 }
 
 
@@ -426,6 +435,9 @@ class TradeCaptureService:
             "strike_price": trade.strike_price,
             "premium": trade.premium,
             "option_volatility": trade.option_volatility,
+            "power_block": trade.power_block,
+            "certificate_registry": trade.certificate_registry,
+            "vintage_year": trade.vintage_year,
         }
         for field, raw_value in changes.items():
             current[field] = _coerce_amendment_value(field, raw_value)
@@ -436,12 +448,12 @@ class TradeCaptureService:
             raise ValidationFailedError(
                 "delivery_end_month must not be before delivery_start_month"
             )
+
+        option_fields = ("option_type", "strike_price", "premium", "option_volatility")
+        certificate_fields = ("certificate_registry", "vintage_year")
+
         if current["trade_type"] == TradeType.OPTION:
-            missing = [
-                f
-                for f in ("option_type", "strike_price", "premium", "option_volatility")
-                if current[f] is None
-            ]
+            missing = [f for f in option_fields if current[f] is None]
             if missing:
                 raise ValidationFailedError(f"OPTION trades require: {sorted(missing)}")
             if current["fixed_price"] is not None:
@@ -452,14 +464,49 @@ class TradeCaptureService:
                 raise ValidationFailedError("strike_price must be positive")
             if float(current["option_volatility"]) <= 0:
                 raise ValidationFailedError("option_volatility must be positive")
+            if any(current[f] is not None for f in certificate_fields):
+                raise ValidationFailedError(
+                    "certificate_registry/vintage_year only apply to REC/EMISSIONS_ALLOWANCE trades"
+                )
+        elif current["trade_type"] in _CERTIFICATE_TRADE_TYPES:
+            missing = [f for f in certificate_fields if current[f] is None]
+            if missing:
+                raise ValidationFailedError(
+                    f"{current['trade_type'].value} trades require: {sorted(missing)}"
+                )
+            if current["fixed_price"] is None:
+                raise ValidationFailedError(
+                    "fixed_price (price per certificate/allowance) is required"
+                )
+            if any(current[f] is not None for f in option_fields):
+                raise ValidationFailedError("option fields may only be set on an OPTION trade")
         else:
             if current["fixed_price"] is None:
                 raise ValidationFailedError("fixed_price is required for SWAP/FORWARD trades")
-            if any(
-                current[f] is not None
-                for f in ("option_type", "strike_price", "premium", "option_volatility")
-            ):
+            if any(current[f] is not None for f in option_fields):
                 raise ValidationFailedError("option fields may only be set on an OPTION trade")
+            if any(current[f] is not None for f in certificate_fields):
+                raise ValidationFailedError(
+                    "certificate_registry/vintage_year only apply to REC/EMISSIONS_ALLOWANCE trades"
+                )
+
+        # commodity itself isn't amendable (see _AMENDABLE_FIELDS), so re-validate
+        # power_block against the trade's fixed, unchangeable commodity -- and, like
+        # TradeCreate, only for actual power delivery products (see there for why
+        # REC/EMISSIONS_ALLOWANCE are excluded even under commodity=POWER).
+        is_power_delivery_product = (
+            trade.commodity == Commodity.POWER
+            and current["trade_type"] not in _CERTIFICATE_TRADE_TYPES
+        )
+        if is_power_delivery_product:
+            if current["power_block"] is None:
+                raise ValidationFailedError(
+                    "power_block is required for POWER SWAP/FORWARD/OPTION trades"
+                )
+        elif current["power_block"] is not None:
+            raise ValidationFailedError(
+                "power_block only applies to POWER SWAP/FORWARD/OPTION trades"
+            )
 
         return Trade(
             trade_date=trade.trade_date,

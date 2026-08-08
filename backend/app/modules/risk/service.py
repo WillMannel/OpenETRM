@@ -5,7 +5,7 @@ import pandas as pd
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.common.dates import month_range
-from app.common.enums import BuySell, Commodity, TradeType, VarMethod
+from app.common.enums import LINEAR_TRADE_TYPES, BuySell, Commodity, TradeType, VarMethod
 from app.common.exceptions import NotFoundError
 from app.core.config import get_settings
 from app.modules.auth.models import User
@@ -182,9 +182,9 @@ class RiskService:
                 trade_date=t.trade_date,
             )
             for t in trades
-            # non-linear payoff (and fixed_price is null for it); excluded, same as
-            # ValuationService.build_positions
-            if t.trade_type != TradeType.OPTION
+            # non-linear/uncurved payoff (and fixed_price is null for some of these);
+            # excluded, same as ValuationService.build_positions
+            if t.trade_type in LINEAR_TRADE_TYPES
             for month in month_range(t.delivery_start_month, t.delivery_end_month)
         ]
         return attribute_pnl(snapshots, prior_date, current_date, prior_prices, current_prices)
