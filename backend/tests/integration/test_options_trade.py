@@ -150,6 +150,30 @@ async def test_option_greeks_endpoint(
 
 
 @pytest.mark.asyncio
+async def test_amendment_cannot_set_a_non_positive_strike_price(
+    client: AsyncClient, db_session: AsyncSession, auth_headers: AuthHeadersFactory
+):
+    """Regression test: TradeCreate rejects strike_price<=0 at trade creation, but
+    amendments went through a separate code path that skipped this check entirely."""
+    counterparty_id, book_id = await _seed_book_and_counterparty(db_session)
+    trader_headers = await auth_headers(UserRole.TRADER, username="neg-strike-trader")
+    risk_headers = await auth_headers(UserRole.RISK_MANAGER, username="neg-strike-risk")
+
+    create_resp = await client.post(
+        "/api/v1/trades", json=_option_payload(counterparty_id, book_id), headers=trader_headers
+    )
+    trade_id = create_resp.json()["id"]
+    await client.post(f"/api/v1/trades/{trade_id}/confirm", headers=risk_headers)
+
+    resp = await client.post(
+        f"/api/v1/trades/{trade_id}/amendments",
+        json={"changes": {"strike_price": -5}, "reason": "fat-fingered strike"},
+        headers=trader_headers,
+    )
+    assert resp.status_code == 422
+
+
+@pytest.mark.asyncio
 async def test_option_greeks_endpoint_rejects_trader(
     client: AsyncClient, db_session: AsyncSession, auth_headers: AuthHeadersFactory
 ):

@@ -10,15 +10,15 @@ import uuid
 from collections import defaultdict
 from datetime import date
 
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.common.dates import month_range
-from app.common.enums import LIVE_TRADE_STATUSES, BuySell, Commodity, TradeType
+from app.common.enums import BuySell, Commodity, TradeType
 from app.common.exceptions import NotFoundError
 from app.core.config import get_settings
 from app.modules.market_data.repository import MarketDataRepository
 from app.modules.trade_capture.models import Trade
+from app.modules.trade_capture.repository import TradeRepository
 from app.modules.valuation.models import Position, ValuationResult
 from app.modules.valuation.options import black76_price
 
@@ -27,15 +27,12 @@ class ValuationService:
     def __init__(self, session: AsyncSession):
         self._session = session
         self._market_data_repo = MarketDataRepository(session)
+        self._trade_repo = TradeRepository(session)
 
     async def _trades_for_book(self, book_id: uuid.UUID) -> list[Trade]:
         """Only LIVE_TRADE_STATUSES count -- a draft (NEW), superseded (AMENDED), or
         CANCELLED trade must not move a position or a book's P&L."""
-        stmt = select(Trade).where(
-            Trade.book_id == book_id, Trade.status.in_([s.value for s in LIVE_TRADE_STATUSES])
-        )
-        result = await self._session.execute(stmt)
-        return list(result.scalars().all())
+        return await self._trade_repo.list_live(book_id)
 
     def build_positions(self, trades: list[Trade], as_of_date: date) -> list[Position]:
         """Roll linear (SWAP/FORWARD) trades up into net volume / average fixed price

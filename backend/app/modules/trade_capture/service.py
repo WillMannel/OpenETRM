@@ -108,7 +108,16 @@ _FIELD_COERCERS: dict[str, Callable[[Any], Any]] = {
 
 def _coerce_amendment_value(field: str, raw: Any) -> Any:
     coercer = _FIELD_COERCERS[field]
-    return raw if isinstance(raw, date) else coercer(raw)
+    if isinstance(raw, date):
+        return raw
+    try:
+        return coercer(raw)
+    except (ValueError, TypeError) as exc:
+        # e.g. TradeType("BOGUS") or float(None) from a malformed changes payload --
+        # AmendmentRequestCreate only validates field *names*, not values, so a bad
+        # value only surfaces here. Without this, it would propagate as an unhandled
+        # 500 instead of the 422 a bad request deserves.
+        raise ValidationFailedError(f"invalid value for {field!r}: {raw!r}") from exc
 
 
 class ReferenceDataService:
@@ -196,6 +205,13 @@ class TradeCaptureService:
         if trade.status != TradeStatus.CONFIRMED:
             raise ValidationFailedError("can only request an amendment on a CONFIRMED trade")
 
+        # Validate now, not just at approval time: nothing else can change `trade`
+        # while this request is PENDING (that's the point of PENDING_AMENDMENT), so a
+        # payload that's invalid now will still be invalid at approval -- fail fast
+        # with a 422 here rather than leaving a doomed request for a risk manager to
+        # discover only when they approve it.
+        self._apply_amendment(trade, payload.changes)
+
         change_request = TradeChangeRequest(
             trade_id=trade.id,
             change_type=ChangeRequestType.AMENDMENT,
@@ -275,6 +291,7 @@ class TradeCaptureService:
 
         if change_request.change_type == ChangeRequestType.AMENDMENT:
             new_trade = self._apply_amendment(trade, change_request.proposed_changes or {})
+            await self._enforce_volume_limit_for_amendment(trade, new_trade, actor)
             self._session.add(new_trade)
             trade.status = TradeStatus.AMENDED
             await self._session.flush()
@@ -348,19 +365,42 @@ class TradeCaptureService:
         await self._session.refresh(change_request)
         return change_request
 
-    async def _enforce_volume_limit_for_confirm(self, trade: Trade, actor: User) -> None:
-        """Blocks the confirm if it would push the book's net volume, in any delivery
-        month, past a configured VOLUME limit for this commodity. `trade` is still NEW
-        at this point, so it isn't yet counted by list_live_for_book -- include it
-        explicitly alongside the book's other live trades."""
-        live_trades = await self._repo.list_live_for_book(trade.book_id)
-        positions = ValuationService(self._session).build_positions(
-            [*live_trades, trade], date.today()
-        )
+    async def _enforce_volume_limit(
+        self,
+        book_id: uuid.UUID,
+        commodity_raw: Any,
+        candidate_trades: list[Trade],
+        actor: User,
+    ) -> None:
+        """Shared by confirm and amendment-approval: raises (and records a breach) if
+        `candidate_trades` -- the book's live trades as they would look *after* the
+        transition being validated -- would push net volume, in any delivery month,
+        past a configured VOLUME limit for this commodity."""
+        positions = ValuationService(self._session).build_positions(candidate_trades, date.today())
         prospective_max_abs_volume = max((abs(p.net_volume) for p in positions), default=0.0)
-        commodity = Commodity(_enum_value(trade.commodity))
+        commodity = Commodity(_enum_value(commodity_raw))
         await self._limit_service.enforce_volume_limit(
-            trade.book_id, commodity, prospective_max_abs_volume, date.today(), actor
+            book_id, commodity, prospective_max_abs_volume, date.today(), actor
+        )
+
+    async def _enforce_volume_limit_for_confirm(self, trade: Trade, actor: User) -> None:
+        """`trade` is still NEW at this point, so it isn't yet counted by
+        list_live -- include it explicitly alongside the book's other live trades."""
+        live_trades = await self._repo.list_live(trade.book_id)
+        await self._enforce_volume_limit(
+            trade.book_id, trade.commodity, [*live_trades, trade], actor
+        )
+
+    async def _enforce_volume_limit_for_amendment(
+        self, original_trade: Trade, new_trade: Trade, actor: User
+    ) -> None:
+        """`original_trade` is being superseded by `new_trade` (same trade, new
+        version) -- check the book's prospective volume with the original trade's
+        volume replaced by the amended one, not added alongside it."""
+        live_trades = await self._repo.list_live(original_trade.book_id)
+        other_live_trades = [t for t in live_trades if t.id != original_trade.id]
+        await self._enforce_volume_limit(
+            original_trade.book_id, new_trade.commodity, [*other_live_trades, new_trade], actor
         )
 
     def _check_pending_and_four_eyes(self, change_request: TradeChangeRequest, actor: User) -> None:
@@ -406,6 +446,12 @@ class TradeCaptureService:
                 raise ValidationFailedError(f"OPTION trades require: {sorted(missing)}")
             if current["fixed_price"] is not None:
                 raise ValidationFailedError("fixed_price does not apply to OPTION trades")
+            # Mirrors TradeCreate._check_ranges -- an amendment shouldn't be able to
+            # sneak a non-positive strike/vol past the same rule creation enforces.
+            if float(current["strike_price"]) <= 0:
+                raise ValidationFailedError("strike_price must be positive")
+            if float(current["option_volatility"]) <= 0:
+                raise ValidationFailedError("option_volatility must be positive")
         else:
             if current["fixed_price"] is None:
                 raise ValidationFailedError("fixed_price is required for SWAP/FORWARD trades")

@@ -60,14 +60,17 @@ class TradeRepository:
         result = await self._session.execute(stmt)
         return list(result.scalars().all())
 
-    async def list_live_for_book(self, book_id: uuid.UUID) -> builtins.list[Trade]:
-        """Trades in a LIVE_TRADE_STATUSES status for this book -- used for pre-trade
-        limit checks, which must reason about the book's economically-live exposure.
+    async def list_live(self, book_id: uuid.UUID | None = None) -> builtins.list[Trade]:
+        """Trades in a LIVE_TRADE_STATUSES status -- a draft (NEW), superseded
+        (AMENDED), or CANCELLED trade must never count toward a position, a book's P&L,
+        risk, or a pre-trade limit check. `book_id=None` returns every live trade
+        across all books (used for whole-portfolio risk runs). The single shared query
+        every one of those call sites goes through.
         (Return type is spelled `builtins.list` because this class also defines a
         method named `list`, which otherwise shadows the builtin generic for mypy.)"""
-        stmt = select(Trade).where(
-            Trade.book_id == book_id, Trade.status.in_([s.value for s in LIVE_TRADE_STATUSES])
-        )
+        stmt = select(Trade).where(Trade.status.in_([s.value for s in LIVE_TRADE_STATUSES]))
+        if book_id is not None:
+            stmt = stmt.where(Trade.book_id == book_id)
         result = await self._session.execute(stmt)
         return list(result.scalars().all())
 

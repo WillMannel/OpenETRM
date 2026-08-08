@@ -171,6 +171,61 @@ async def test_var_limit_breach_is_recorded_but_does_not_block_the_run(
 
 
 @pytest.mark.asyncio
+async def test_volume_limit_blocks_amendment_approval_over_threshold(
+    client: AsyncClient, db_session: AsyncSession, auth_headers: AuthHeadersFactory
+):
+    """Regression test: approving an amendment used to skip the VOLUME limit check
+    entirely (only confirm_trade enforced it), so an amendment could blow through a
+    limit that trade confirmation would have blocked."""
+    counterparty_id, book_id = await _seed_book_and_counterparty(db_session)
+    trader_headers = await auth_headers(UserRole.TRADER, username="amend-limit-trader")
+    risk_headers = await auth_headers(UserRole.RISK_MANAGER, username="amend-limit-risk")
+
+    limit_resp = await client.post(
+        "/api/v1/limits",
+        json={
+            "book_id": book_id,
+            "commodity": "HENRY_HUB",
+            "limit_type": "VOLUME",
+            "threshold": 5000,
+        },
+        headers=risk_headers,
+    )
+    assert limit_resp.status_code == 201
+
+    trade_resp = await client.post(
+        "/api/v1/trades", json=_swap_payload(counterparty_id, book_id, 4000), headers=trader_headers
+    )
+    trade_id = trade_resp.json()["id"]
+    confirm_resp = await client.post(f"/api/v1/trades/{trade_id}/confirm", headers=risk_headers)
+    assert confirm_resp.status_code == 200
+
+    # amend the confirmed trade's volume up past the limit
+    amend_resp = await client.post(
+        f"/api/v1/trades/{trade_id}/amendments",
+        json={"changes": {"volume": 20000}, "reason": "counterparty wants a bigger clip"},
+        headers=trader_headers,
+    )
+    assert amend_resp.status_code == 201
+    change_request_id = amend_resp.json()["id"]
+
+    approve_resp = await client.post(
+        f"/api/v1/trade-change-requests/{change_request_id}/approve",
+        json={},
+        headers=risk_headers,
+    )
+    assert approve_resp.status_code == 422
+    assert "VOLUME limit" in approve_resp.json()["detail"]
+
+    # the blocked approval must not have applied the amendment: the trade is still
+    # awaiting review (PENDING_AMENDMENT, same as before this approve attempt) at its
+    # original volume -- not silently bumped to the over-limit value.
+    trade_after = (await client.get(f"/api/v1/trades/{trade_id}", headers=trader_headers)).json()
+    assert trade_after["status"] == "PENDING_AMENDMENT"
+    assert trade_after["volume"] == 4000
+
+
+@pytest.mark.asyncio
 async def test_creating_limit_twice_updates_rather_than_duplicates(
     client: AsyncClient, db_session: AsyncSession, auth_headers: AuthHeadersFactory
 ):

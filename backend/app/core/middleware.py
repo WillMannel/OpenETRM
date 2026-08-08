@@ -19,32 +19,40 @@ from app.core.metrics import http_request_duration_seconds, http_requests_total
 logger = logging.getLogger("app.request")
 
 
+def _route_template(request: Request) -> str:
+    """The matched route's path template (e.g. /api/v1/trades/{trade_id}) once FastAPI
+    has resolved routing, so metrics collapse per-id paths into one series instead of
+    one per id. Falls back to the raw path if routing never resolved (a 404, or an
+    exception raised before/during route matching)."""
+    route = request.scope.get("route")
+    if route is not None and getattr(route, "path", None):
+        return route.path
+    return request.url.path
+
+
 class RequestContextMiddleware(BaseHTTPMiddleware):
     async def dispatch(
         self, request: Request, call_next: Callable[[Request], Awaitable[Response]]
     ) -> Response:
         request_id = request.headers.get("x-request-id", str(uuid.uuid4()))
         token = request_id_ctx.set(request_id)
-        route_template = request.url.path
         start = time.perf_counter()
         try:
-            response = await call_next(request)
-        except Exception:
-            duration = time.perf_counter() - start
-            http_requests_total.labels(request.method, route_template, "500").inc()
-            http_request_duration_seconds.labels(request.method, route_template).observe(duration)
-            logger.exception("request failed: %s %s", request.method, request.url.path)
-            raise
+            try:
+                response = await call_next(request)
+            except Exception:
+                duration = time.perf_counter() - start
+                http_requests_total.labels(request.method, _route_template(request), "500").inc()
+                http_request_duration_seconds.labels(
+                    request.method, _route_template(request)
+                ).observe(duration)
+                logger.exception("request failed: %s %s", request.method, request.url.path)
+                raise
         finally:
             request_id_ctx.reset(token)
 
         duration = time.perf_counter() - start
-        # Prefer the matched route's path template (set by FastAPI once routing
-        # resolves) so e.g. /api/v1/trades/<uuid> and /api/v1/trades/<uuid2> collapse
-        # into one metrics series instead of one per id.
-        route = request.scope.get("route")
-        if route is not None and getattr(route, "path", None):
-            route_template = route.path
+        route_template = _route_template(request)
         http_requests_total.labels(request.method, route_template, str(response.status_code)).inc()
         http_request_duration_seconds.labels(request.method, route_template).observe(duration)
 

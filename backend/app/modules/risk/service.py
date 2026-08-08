@@ -2,11 +2,10 @@ import uuid
 from datetime import date
 
 import pandas as pd
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.common.dates import month_range
-from app.common.enums import LIVE_TRADE_STATUSES, BuySell, Commodity, TradeType, VarMethod
+from app.common.enums import BuySell, Commodity, TradeType, VarMethod
 from app.common.exceptions import NotFoundError
 from app.core.config import get_settings
 from app.modules.auth.models import User
@@ -20,6 +19,7 @@ from app.modules.risk.var.pnl_attribution import PnlAttribution, TradeMonthSnaps
 from app.modules.risk.var.sensitivities import bucketed_delta_ladder
 from app.modules.risk.var.stress import StressResult, StressScenario, run_stress_scenarios
 from app.modules.trade_capture.models import Trade
+from app.modules.trade_capture.repository import TradeRepository
 from app.modules.valuation.options import OptionGreeks, black76_greeks
 from app.modules.valuation.service import ValuationService
 
@@ -36,13 +36,10 @@ class RiskService:
         self._market_data_repo = MarketDataRepository(session)
         self._valuation_service = ValuationService(session)
         self._limit_service = LimitService(session)
+        self._trade_repo = TradeRepository(session)
 
     async def _live_trades(self, book_id: uuid.UUID | None) -> list[Trade]:
-        stmt = select(Trade).where(Trade.status.in_([s.value for s in LIVE_TRADE_STATUSES]))
-        if book_id is not None:
-            stmt = stmt.where(Trade.book_id == book_id)
-        result = await self._session.execute(stmt)
-        return list(result.scalars().all())
+        return await self._trade_repo.list_live(book_id)
 
     async def _net_volume_by_month(self, book_id: uuid.UUID | None, as_of_date: date) -> pd.Series:
         trades = await self._live_trades(book_id)

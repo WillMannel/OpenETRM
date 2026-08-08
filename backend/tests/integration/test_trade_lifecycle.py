@@ -133,6 +133,30 @@ async def test_amendment_approval_creates_new_version_and_supersedes_old(
 
 
 @pytest.mark.asyncio
+async def test_amendment_with_malformed_value_is_rejected_at_request_time(
+    client: AsyncClient, db_session: AsyncSession, auth_headers: AuthHeadersFactory
+):
+    """Regression test: an amendment's changes dict is only validated against known
+    *field names* by the schema; a bad *value* (e.g. an unknown trade_type) used to
+    slip through as a stored PENDING request and only blow up -- as an unhandled 500,
+    not a 422 -- when a risk manager later tried to approve it."""
+    counterparty_id, book_id = await _seed_book_and_counterparty(db_session)
+    trader_headers = await auth_headers(UserRole.TRADER, username="malformed-trader")
+    risk_headers = await auth_headers(UserRole.RISK_MANAGER, username="malformed-risk")
+
+    trade_id = await _book_confirmed_trade(
+        client, counterparty_id, book_id, trader_headers, risk_headers
+    )
+
+    resp = await client.post(
+        f"/api/v1/trades/{trade_id}/amendments",
+        json={"changes": {"trade_type": "BOGUS"}, "reason": "typo'd amendment"},
+        headers=trader_headers,
+    )
+    assert resp.status_code == 422
+
+
+@pytest.mark.asyncio
 async def test_four_eyes_rejects_self_approval(
     client: AsyncClient, db_session: AsyncSession, auth_headers: AuthHeadersFactory
 ):
