@@ -38,11 +38,19 @@ class RiskService:
         self._limit_service = LimitService(session)
         self._trade_repo = TradeRepository(session)
 
-    async def _live_trades(self, book_id: uuid.UUID | None) -> list[Trade]:
-        return await self._trade_repo.list_live(book_id)
+    async def _live_trades(
+        self, book_id: uuid.UUID | None, commodity: Commodity | None = None
+    ) -> list[Trade]:
+        return await self._trade_repo.list_live(book_id, commodity=commodity)
 
-    async def _net_volume_by_month(self, book_id: uuid.UUID | None, as_of_date: date) -> pd.Series:
-        trades = await self._live_trades(book_id)
+    async def _net_volume_by_month(
+        self, book_id: uuid.UUID | None, as_of_date: date, commodity: Commodity
+    ) -> pd.Series:
+        """Every caller of this feeds the result into a single curve-valued number
+        (VaR, a delta ladder, a stress test) for one commodity, so the trades behind it
+        must be scoped to that same commodity -- otherwise an unrelated commodity's
+        volume silently nets into the series (see test_multi_commodity_book.py)."""
+        trades = await self._live_trades(book_id, commodity=commodity)
         positions = self._valuation_service.build_positions(trades, as_of_date)
         if not positions:
             return pd.Series(dtype=float)
@@ -77,7 +85,7 @@ class RiskService:
         actor: User | None = None,
     ) -> VarResult:
         price_panel = await self._price_panel(commodity, as_of_date, scenario_window_days)
-        net_volume = await self._net_volume_by_month(book_id, as_of_date)
+        net_volume = await self._net_volume_by_month(book_id, as_of_date, commodity)
 
         var_fn = _VAR_METHODS[method]
         var_value = var_fn(
@@ -114,7 +122,7 @@ class RiskService:
         if curve is None:
             raise NotFoundError("ForwardCurve", f"{commodity}@{as_of_date}")
 
-        net_volume = await self._net_volume_by_month(book_id, as_of_date)
+        net_volume = await self._net_volume_by_month(book_id, as_of_date, commodity)
         price_by_bucket = {p.tenor_bucket: float(p.price) for p in curve.points}
         month_by_bucket = {p.tenor_bucket: p.delivery_month for p in curve.points}
 
@@ -173,7 +181,7 @@ class RiskService:
         )
         current_prices = {p.delivery_month: float(p.price) for p in current_curve.points}
 
-        trades = await self._live_trades(book_id)
+        trades = await self._live_trades(book_id, commodity=commodity)
         snapshots = [
             TradeMonthSnapshot(
                 delivery_month=month,
@@ -201,7 +209,7 @@ class RiskService:
 
         rate = get_settings().risk_free_rate
         results: list[tuple[Trade, OptionGreeks]] = []
-        for trade in await self._live_trades(book_id):
+        for trade in await self._live_trades(book_id, commodity=commodity):
             if trade.trade_type != TradeType.OPTION:
                 continue
             forward = curve_price_by_month.get(trade.delivery_start_month)

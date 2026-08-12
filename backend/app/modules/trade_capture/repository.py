@@ -4,7 +4,7 @@ import uuid
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.common.enums import LIVE_TRADE_STATUSES, ChangeRequestStatus
+from app.common.enums import LIVE_TRADE_STATUSES, ChangeRequestStatus, Commodity
 from app.modules.trade_capture.models import Book, Counterparty, Trade, TradeChangeRequest
 
 
@@ -60,17 +60,25 @@ class TradeRepository:
         result = await self._session.execute(stmt)
         return list(result.scalars().all())
 
-    async def list_live(self, book_id: uuid.UUID | None = None) -> builtins.list[Trade]:
+    async def list_live(
+        self, book_id: uuid.UUID | None = None, commodity: Commodity | None = None
+    ) -> builtins.list[Trade]:
         """Trades in a LIVE_TRADE_STATUSES status -- a draft (NEW), superseded
         (AMENDED), or CANCELLED trade must never count toward a position, a book's P&L,
         risk, or a pre-trade limit check. `book_id=None` returns every live trade
-        across all books (used for whole-portfolio risk runs). The single shared query
-        every one of those call sites goes through.
+        across all books (used for whole-portfolio risk runs). `commodity=None`
+        returns every commodity -- callers that feed the result into a single
+        curve-valued number (a position, a VaR run, a limit check) MUST pass the
+        commodity they're valuing against, or risk silently netting unrelated
+        commodities together (see test_multi_commodity_book.py). The single shared
+        query every one of those call sites goes through.
         (Return type is spelled `builtins.list` because this class also defines a
         method named `list`, which otherwise shadows the builtin generic for mypy.)"""
         stmt = select(Trade).where(Trade.status.in_([s.value for s in LIVE_TRADE_STATUSES]))
         if book_id is not None:
             stmt = stmt.where(Trade.book_id == book_id)
+        if commodity is not None:
+            stmt = stmt.where(Trade.commodity == commodity)
         result = await self._session.execute(stmt)
         return list(result.scalars().all())
 

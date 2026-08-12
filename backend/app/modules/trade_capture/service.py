@@ -394,8 +394,11 @@ class TradeCaptureService:
 
     async def _enforce_volume_limit_for_confirm(self, trade: Trade, actor: User) -> None:
         """`trade` is still NEW at this point, so it isn't yet counted by
-        list_live -- include it explicitly alongside the book's other live trades."""
-        live_trades = await self._repo.list_live(trade.book_id)
+        list_live -- include it explicitly alongside the book's other live trades.
+        Scoped to `trade`'s own commodity: an unrelated commodity's position in the
+        same book must never count toward this limit (see test_multi_commodity_book.py)."""
+        commodity = Commodity(_enum_value(trade.commodity))
+        live_trades = await self._repo.list_live(trade.book_id, commodity=commodity)
         await self._enforce_volume_limit(
             trade.book_id, trade.commodity, [*live_trades, trade], actor
         )
@@ -405,8 +408,12 @@ class TradeCaptureService:
     ) -> None:
         """`original_trade` is being superseded by `new_trade` (same trade, new
         version) -- check the book's prospective volume with the original trade's
-        volume replaced by the amended one, not added alongside it."""
-        live_trades = await self._repo.list_live(original_trade.book_id)
+        volume replaced by the amended one, not added alongside it. Commodity isn't
+        amendable (see _AMENDABLE_FIELDS), so original_trade and new_trade always share
+        one commodity; scoped to it so an unrelated commodity's position in the same
+        book never counts toward this limit."""
+        commodity = Commodity(_enum_value(new_trade.commodity))
+        live_trades = await self._repo.list_live(original_trade.book_id, commodity=commodity)
         other_live_trades = [t for t in live_trades if t.id != original_trade.id]
         await self._enforce_volume_limit(
             original_trade.book_id, new_trade.commodity, [*other_live_trades, new_trade], actor

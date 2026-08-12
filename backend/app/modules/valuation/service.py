@@ -23,34 +23,60 @@ from app.modules.valuation.models import Position, ValuationResult
 from app.modules.valuation.options import black76_price
 
 
+def _enum_value(v: object) -> object:
+    """ORM attributes on these str-mixin-enum columns come back as a plain `str` after
+    a DB round trip, but as the actual enum instance on a freshly-constructed object --
+    handle both uniformly."""
+    return v.value if hasattr(v, "value") else v
+
+
 class ValuationService:
     def __init__(self, session: AsyncSession):
         self._session = session
         self._market_data_repo = MarketDataRepository(session)
         self._trade_repo = TradeRepository(session)
 
-    async def _trades_for_book(self, book_id: uuid.UUID) -> list[Trade]:
+    async def _trades_for_book(self, book_id: uuid.UUID, commodity: Commodity) -> list[Trade]:
         """Only LIVE_TRADE_STATUSES count -- a draft (NEW), superseded (AMENDED), or
-        CANCELLED trade must not move a position or a book's P&L."""
-        return await self._trade_repo.list_live(book_id)
+        CANCELLED trade must not move a position or a book's P&L. Scoped to a single
+        commodity: a book that holds both gas and power must never have those legs
+        netted into the same position (see test_multi_commodity_book.py)."""
+        return await self._trade_repo.list_live(book_id, commodity=commodity)
 
     def build_positions(self, trades: list[Trade], as_of_date: date) -> list[Position]:
         """Roll LINEAR_TRADE_TYPES (SWAP/FORWARD) trades up into net volume / average
-        fixed price per delivery month. OPTION trades are excluded -- their payoff
-        isn't linear in volume the way a swap/forward's is (different trades can carry
-        different strikes/volatilities), so they're valued individually instead; see
-        price_option_trade / mark_to_market. REC/EMISSIONS_ALLOWANCE trades are
-        excluded too -- v1 has no curve-based valuation for them at all (see
-        common.enums.LINEAR_TRADE_TYPES)."""
-        buckets: dict[date, list[Trade]] = defaultdict(list)
+        fixed price per (commodity, delivery month). OPTION trades are excluded --
+        their payoff isn't linear in volume the way a swap/forward's is (different
+        trades can carry different strikes/volatilities), so they're valued
+        individually instead; see price_option_trade / mark_to_market.
+        REC/EMISSIONS_ALLOWANCE trades are excluded too -- v1 has no curve-based
+        valuation for them at all (see common.enums.LINEAR_TRADE_TYPES).
+
+        The bucket key is (commodity, month), not just month -- callers are still
+        responsible for passing in trades already scoped to one commodity where that
+        matters (a single curve-valued number must never span commodities), but this
+        grain keeps that true even if a caller passes a mixed-commodity trade list."""
+        buckets: dict[tuple[str, date], list[Trade]] = defaultdict(list)
         for trade in trades:
             if trade.trade_type not in LINEAR_TRADE_TYPES:
                 continue
+            commodity_key = str(_enum_value(trade.commodity))
             for month in month_range(trade.delivery_start_month, trade.delivery_end_month):
-                buckets[month].append(trade)
+                buckets[(commodity_key, month)].append(trade)
 
         positions: list[Position] = []
-        for month, month_trades in sorted(buckets.items()):
+        sorted_buckets = sorted(buckets.items(), key=lambda kv: kv[0][1])
+        for (_commodity_key, month), month_trades in sorted_buckets:
+            volume_units = {_enum_value(t.volume_unit) for t in month_trades}
+            if len(volume_units) > 1:
+                # Same commodity, same month, but different volume units -- summing
+                # raw volumes would silently blend incompatible units (e.g. MMBtu and
+                # Dth). This should never happen given how commodities map to units
+                # today, but fail loudly rather than fabricate a number if it ever does.
+                raise ValueError(
+                    f"mixed volume units {volume_units} within one position bucket "
+                    f"({_commodity_key}, {month}) -- refusing to net incompatible units"
+                )
             signed_volumes = [
                 (float(t.volume) if t.buy_sell == BuySell.BUY else -float(t.volume))
                 for t in month_trades
@@ -125,7 +151,7 @@ class ValuationService:
         if curve is None:
             raise NotFoundError("ForwardCurve", f"{commodity}@{as_of_date}")
 
-        trades = await self._trades_for_book(book_id)
+        trades = await self._trades_for_book(book_id, commodity)
         positions = self.build_positions(trades, as_of_date)
         curve_price_by_month = {p.delivery_month: float(p.price) for p in curve.points}
 
