@@ -36,6 +36,24 @@ jobs:
       - run: pip install -e ".[dev]"
       - run: pytest -q
 
+  # Fails the build if a quant module (options pricing, VaR, sensitivities, stress,
+  # P&L attribution, curve bootstrap) doesn't have an independently-derived numeric
+  # regression pin -- see tests/golden/README.md for why that's a different, stronger
+  # bar than "pytest is green." Deliberately its own job (not folded into backend-test)
+  # so a coverage shortfall reports as a distinctly-named, easy-to-find CI failure.
+  quant-golden-coverage:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install -e ".[dev]"
+      - run: python scripts/check_quant_golden_coverage.py
+
   # Everything above runs against SQLite (fast, no external services). This job is the
   # one place that actually exercises Postgres/TimescaleDB + Redis + a live Arq worker:
   # it runs the real Alembic migration (never just Base.metadata.create_all) and the
@@ -133,6 +151,7 @@ jobs:
         backend-integration-postgres,
         contract-check,
         frontend-lint-and-test,
+        quant-golden-coverage,
       ]
     steps:
       - uses: actions/checkout@v4

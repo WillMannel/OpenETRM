@@ -334,6 +334,11 @@ details.
 - `contract-check`: regenerates the frontend's TS types from the backend's live OpenAPI
   schema and diffs against the committed `frontend/src/api/generated/types.ts`, so the
   two can't silently drift apart.
+- `quant-golden-coverage`: fails the build if a quant module (option pricing, VaR,
+  sensitivities, stress testing, P&L attribution, curve bootstrapping) doesn't carry
+  numeric-result assertions derived independently of the implementation, not just
+  status-code/shape checks. See `backend/tests/golden/README.md` and
+  `backend/scripts/check_quant_golden_coverage.py`.
 - `frontend-lint-and-test`, `docker-build`: as named.
 
 ## Repository layout

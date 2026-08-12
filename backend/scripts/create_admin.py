@@ -7,6 +7,7 @@ this once per deployment, then use /auth/users for everyone after that.
 Usage:
     python scripts/create_admin.py <username> <email> <password>
 """
+
 import asyncio
 import sys
 
@@ -24,7 +25,10 @@ async def main(username: str, email: str, password: str) -> None:
             print(f"user {username!r} already exists -- nothing to do")
             return
         user = User(
-            username=username, email=email, hashed_password=hash_password(password), role=UserRole.ADMIN
+            username=username,
+            email=email,
+            hashed_password=hash_password(password),
+            role=UserRole.ADMIN,
         )
         await repo.add(user)
         print(f"created admin user {username!r}")
