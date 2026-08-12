@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_arq_pool, get_current_user, get_db, require_role
 from app.common.enums import Commodity, UserRole
-from app.common.exceptions import NotFoundError
+from app.common.exceptions import ForbiddenError, NotFoundError
 from app.common.job_schemas import JobEnqueuedRead, JobStatusRead
 from app.core.jobs import get_job_snapshot
 from app.modules.auth.models import User
@@ -39,20 +39,25 @@ _RISK_OR_ADMIN = require_role(UserRole.RISK_MANAGER, UserRole.ADMIN)
 async def run_var(
     payload: VarRunRequest,
     session: AsyncSession = Depends(get_db),
-    _actor: User = Depends(_RISK_OR_ADMIN),
+    actor: User = Depends(_RISK_OR_ADMIN),
 ) -> VarResultRead:
     """Synchronous VaR run -- fine at v1's data volumes. See /risk/var/run-async for the
     background-job version (app.tasks.risk_tasks.run_var_job)."""
     service = RiskService(session)
-    result = await service.run_var(
-        payload.book_id,
-        payload.as_of_date,
-        payload.commodity,
-        int(payload.confidence_level),
-        payload.scenario_window_days,
-        payload.method,
-        actor=_actor,
-    )
+    try:
+        result = await service.run_var(
+            payload.book_id,
+            payload.as_of_date,
+            payload.commodity,
+            int(payload.confidence_level),
+            payload.scenario_window_days,
+            payload.method,
+            actor=actor,
+        )
+    except NotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ForbiddenError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
     return VarResultRead.model_validate(result)
 
 
@@ -60,7 +65,7 @@ async def run_var(
 async def run_var_async(
     payload: VarRunRequest,
     pool: ArqRedis = Depends(get_arq_pool),
-    _actor: User = Depends(_RISK_OR_ADMIN),
+    actor: User = Depends(_RISK_OR_ADMIN),
 ) -> JobEnqueuedRead:
     job = await pool.enqueue_job(
         "run_var_job",
@@ -69,6 +74,7 @@ async def run_var_async(
         payload.commodity.value,
         int(payload.confidence_level),
         payload.scenario_window_days,
+        str(actor.id),
     )
     if job is None:
         raise HTTPException(status_code=503, detail="Failed to enqueue VaR job")
@@ -101,15 +107,19 @@ async def get_delta_ladder(
     as_of_date: date,
     commodity: Commodity = Commodity.HENRY_HUB,
     session: AsyncSession = Depends(get_db),
-    _actor: User = Depends(_RISK_OR_ADMIN),
+    actor: User = Depends(_RISK_OR_ADMIN),
 ) -> DeltaLadderRead:
     """Synchronous delta-ladder run. See /risk/delta-ladder/run-async for the
     background-job version (app.tasks.risk_tasks.run_sensitivities_job)."""
     service = RiskService(session)
     try:
-        curve_id, results = await service.run_delta_ladder(book_id, as_of_date, commodity)
+        curve_id, results = await service.run_delta_ladder(
+            book_id, as_of_date, commodity, actor=actor
+        )
     except NotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ForbiddenError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
 
     return DeltaLadderRead(
         book_id=book_id,
@@ -123,13 +133,14 @@ async def get_delta_ladder(
 async def run_delta_ladder_async(
     payload: DeltaLadderRunRequest,
     pool: ArqRedis = Depends(get_arq_pool),
-    _actor: User = Depends(_RISK_OR_ADMIN),
+    actor: User = Depends(_RISK_OR_ADMIN),
 ) -> JobEnqueuedRead:
     job = await pool.enqueue_job(
         "run_sensitivities_job",
         str(payload.book_id),
         payload.as_of_date.isoformat(),
         payload.commodity.value,
+        str(actor.id),
     )
     if job is None:
         raise HTTPException(status_code=503, detail="Failed to enqueue delta-ladder job")
@@ -148,7 +159,7 @@ async def get_delta_ladder_job(
 async def run_stress_test(
     payload: StressTestRequest,
     session: AsyncSession = Depends(get_db),
-    _actor: User = Depends(_RISK_OR_ADMIN),
+    actor: User = Depends(_RISK_OR_ADMIN),
 ) -> StressTestResponse:
     service = RiskService(session)
     scenarios = (
@@ -161,10 +172,12 @@ async def run_stress_test(
     )
     try:
         results = await service.run_stress_test(
-            payload.book_id, payload.as_of_date, payload.commodity, scenarios
+            payload.book_id, payload.as_of_date, payload.commodity, scenarios, actor=actor
         )
     except NotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ForbiddenError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
 
     return StressTestResponse(
         book_id=payload.book_id,
@@ -180,15 +193,21 @@ async def run_stress_test(
 async def run_pnl_attribution(
     payload: PnlAttributionRequest,
     session: AsyncSession = Depends(get_db),
-    _actor: User = Depends(_RISK_OR_ADMIN),
+    actor: User = Depends(_RISK_OR_ADMIN),
 ) -> PnlAttributionResponse:
     service = RiskService(session)
     try:
         attribution = await service.compute_pnl_attribution(
-            payload.book_id, payload.prior_date, payload.current_date, payload.commodity
+            payload.book_id,
+            payload.prior_date,
+            payload.current_date,
+            payload.commodity,
+            actor=actor,
         )
     except NotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ForbiddenError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
 
     return PnlAttributionResponse(
         book_id=payload.book_id,
@@ -204,15 +223,17 @@ async def run_pnl_attribution(
 async def run_option_greeks(
     payload: OptionGreeksRequest,
     session: AsyncSession = Depends(get_db),
-    _actor: User = Depends(_RISK_OR_ADMIN),
+    actor: User = Depends(_RISK_OR_ADMIN),
 ) -> OptionGreeksResponse:
     service = RiskService(session)
     try:
         greeks_by_trade = await service.compute_option_greeks(
-            payload.book_id, payload.as_of_date, payload.commodity
+            payload.book_id, payload.as_of_date, payload.commodity, actor=actor
         )
     except NotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ForbiddenError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
 
     return OptionGreeksResponse(
         book_id=payload.book_id,

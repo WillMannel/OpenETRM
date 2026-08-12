@@ -20,6 +20,14 @@ would expose `users.hashed_password` / `api_keys.hashed_key` and every other mod
 raw data this role has no business seeing; least-privilege by construction, not by
 convention.
 
+**Desk separation note**: this role is intentionally a single, shared,
+enterprise-wide read role — it doesn't authenticate as an individual OpenETRM user, so
+the book-level entitlements/desk walls `app.modules.entitlements` enforces at the API
+layer (see `ARCHITECTURE.md`) do **not** apply here: a connection through this role
+sees every book's rows in every view, walled or not. If a deployment needs row-level
+desk separation in its BI tool too, that's a deferred, buildable extension (per-desk
+Postgres roles + row-level-security policies) — see `FUTURE_WORK.md` §9.
+
 **Views** (`alembic/versions/..._reporting_views.py`), all in the `public` schema:
 
 | View | Grain | Notes |

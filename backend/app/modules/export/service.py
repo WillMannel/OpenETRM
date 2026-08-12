@@ -18,6 +18,8 @@ from typing import Any
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.modules.auth.models import User
+from app.modules.entitlements.service import EntitlementService
 from app.modules.risk.models import VarResult
 from app.modules.trade_capture.models import Trade
 from app.modules.valuation.models import Position, ValuationResult, ValuationRun
@@ -125,18 +127,35 @@ def _latest_valuation_run_ids() -> Any:
 class ExportService:
     def __init__(self, session: AsyncSession):
         self._session = session
+        self._entitlement_service = EntitlementService(session)
+
+    async def _book_scope(
+        self, actor: User, book_id: uuid.UUID | None
+    ) -> tuple[uuid.UUID | None, set[uuid.UUID] | None]:
+        """Returns (book_id, book_ids) filters for a query: if the caller asked for a
+        specific book, checks they're entitled to it and returns it alone; otherwise
+        returns every book they're entitled to, so a whole-portfolio export never
+        leaks another desk's rows to a caller who isn't ADMIN."""
+        if book_id is not None:
+            await self._entitlement_service.assert_can_access_book(actor, book_id)
+            return book_id, None
+        return None, await self._entitlement_service.accessible_book_ids(actor)
 
     async def trades(
         self,
         *,
+        actor: User,
         book_id: uuid.UUID | None = None,
         updated_since: datetime | None = None,
         limit: int = 1000,
         offset: int = 0,
     ) -> list[dict[str, Any]]:
+        scoped_book_id, book_ids = await self._book_scope(actor, book_id)
         stmt = select(Trade).order_by(Trade.updated_at.desc()).limit(limit).offset(offset)
-        if book_id is not None:
-            stmt = stmt.where(Trade.book_id == book_id)
+        if scoped_book_id is not None:
+            stmt = stmt.where(Trade.book_id == scoped_book_id)
+        if book_ids is not None:
+            stmt = stmt.where(Trade.book_id.in_(book_ids))
         if updated_since is not None:
             stmt = stmt.where(Trade.updated_at >= updated_since)
         result = await self._session.execute(stmt)
@@ -145,6 +164,7 @@ class ExportService:
     async def positions(
         self,
         *,
+        actor: User,
         as_of_date: date,
         book_id: uuid.UUID | None = None,
         limit: int = 1000,
@@ -154,6 +174,7 @@ class ExportService:
         # as_of_date -- which snapshot -- is the natural filter, not an updated_since.
         # Scoped to the latest run per (book, commodity, as_of_date) so a book that's
         # been re-valued more than once doesn't export duplicate, superseded rows.
+        scoped_book_id, book_ids = await self._book_scope(actor, book_id)
         stmt = (
             select(Position)
             .where(Position.as_of_date == as_of_date)
@@ -162,14 +183,17 @@ class ExportService:
             .limit(limit)
             .offset(offset)
         )
-        if book_id is not None:
-            stmt = stmt.where(Position.book_id == book_id)
+        if scoped_book_id is not None:
+            stmt = stmt.where(Position.book_id == scoped_book_id)
+        if book_ids is not None:
+            stmt = stmt.where(Position.book_id.in_(book_ids))
         result = await self._session.execute(stmt)
         return [_position_row(p) for p in result.scalars().all()]
 
     async def valuation_results(
         self,
         *,
+        actor: User,
         book_id: uuid.UUID | None = None,
         updated_since: datetime | None = None,
         limit: int = 1000,
@@ -177,6 +201,7 @@ class ExportService:
     ) -> list[dict[str, Any]]:
         # Scoped to the latest run per (book, commodity, as_of_date) -- see positions()
         # above for why.
+        scoped_book_id, book_ids = await self._book_scope(actor, book_id)
         stmt = (
             select(ValuationResult)
             .where(ValuationResult.run_id.in_(_latest_valuation_run_ids()))
@@ -184,8 +209,10 @@ class ExportService:
             .limit(limit)
             .offset(offset)
         )
-        if book_id is not None:
-            stmt = stmt.where(ValuationResult.book_id == book_id)
+        if scoped_book_id is not None:
+            stmt = stmt.where(ValuationResult.book_id == scoped_book_id)
+        if book_ids is not None:
+            stmt = stmt.where(ValuationResult.book_id.in_(book_ids))
         if updated_since is not None:
             stmt = stmt.where(ValuationResult.computed_at >= updated_since)
         result = await self._session.execute(stmt)
@@ -194,14 +221,18 @@ class ExportService:
     async def var_results(
         self,
         *,
+        actor: User,
         book_id: uuid.UUID | None = None,
         updated_since: datetime | None = None,
         limit: int = 1000,
         offset: int = 0,
     ) -> list[dict[str, Any]]:
+        scoped_book_id, book_ids = await self._book_scope(actor, book_id)
         stmt = select(VarResult).order_by(VarResult.computed_at.desc()).limit(limit).offset(offset)
-        if book_id is not None:
-            stmt = stmt.where(VarResult.book_id == book_id)
+        if scoped_book_id is not None:
+            stmt = stmt.where(VarResult.book_id == scoped_book_id)
+        if book_ids is not None:
+            stmt = stmt.where(VarResult.book_id.in_(book_ids))
         if updated_since is not None:
             stmt = stmt.where(VarResult.computed_at >= updated_since)
         result = await self._session.execute(stmt)

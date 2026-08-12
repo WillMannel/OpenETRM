@@ -5,10 +5,11 @@ import pandas as pd
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.common.dates import month_range
-from app.common.enums import LINEAR_TRADE_TYPES, BuySell, Commodity, TradeType, VarMethod
-from app.common.exceptions import NotFoundError
+from app.common.enums import LINEAR_TRADE_TYPES, BuySell, Commodity, TradeType, UserRole, VarMethod
+from app.common.exceptions import ForbiddenError, NotFoundError
 from app.core.config import get_settings
 from app.modules.auth.models import User
+from app.modules.entitlements.service import EntitlementService
 from app.modules.limits.service import LimitService
 from app.modules.market_data.repository import MarketDataRepository
 from app.modules.risk.models import SensitivityResult, VarResult
@@ -37,6 +38,22 @@ class RiskService:
         self._valuation_service = ValuationService(session)
         self._limit_service = LimitService(session)
         self._trade_repo = TradeRepository(session)
+        self._entitlement_service = EntitlementService(session)
+
+    async def _assert_can_access_risk_scope(self, actor: User, book_id: uuid.UUID | None) -> None:
+        """book_id=None is a portfolio-wide run across every book -- there's no single
+        book to check entitlement against, and filtering the trades behind it down to
+        "only the caller's accessible books" would silently produce a different,
+        smaller-scope number under the same "portfolio-wide" label, which is worse
+        than just refusing. So a portfolio-wide run requires ADMIN outright."""
+        if book_id is None:
+            role = UserRole(actor.role.value if hasattr(actor.role, "value") else actor.role)
+            if role != UserRole.ADMIN:
+                raise ForbiddenError(
+                    "a portfolio-wide (book_id=None) risk run requires the ADMIN role"
+                )
+            return
+        await self._entitlement_service.assert_can_access_book(actor, book_id)
 
     async def _live_trades(
         self, book_id: uuid.UUID | None, commodity: Commodity | None = None
@@ -82,8 +99,10 @@ class RiskService:
         confidence_level: int,
         scenario_window_days: int,
         method: VarMethod = VarMethod.HISTORICAL_SIM,
-        actor: User | None = None,
+        *,
+        actor: User,
     ) -> VarResult:
+        await self._assert_can_access_risk_scope(actor, book_id)
         price_panel = await self._price_panel(commodity, as_of_date, scenario_window_days)
         net_volume = await self._net_volume_by_month(book_id, as_of_date, commodity)
 
@@ -137,8 +156,15 @@ class RiskService:
         return curve, price_by_bucket, revalue
 
     async def run_delta_ladder(
-        self, book_id: uuid.UUID, as_of_date: date, commodity: Commodity, bump_size: float = 0.01
+        self,
+        book_id: uuid.UUID,
+        as_of_date: date,
+        commodity: Commodity,
+        bump_size: float = 0.01,
+        *,
+        actor: User,
     ) -> tuple[uuid.UUID, list[SensitivityResult]]:
+        await self._entitlement_service.assert_can_access_book(actor, book_id)
         curve, price_by_bucket, revalue = await self._curve_context(book_id, as_of_date, commodity)
         ladder = bucketed_delta_ladder(price_by_bucket, revalue, bump_size)
 
@@ -164,13 +190,23 @@ class RiskService:
         as_of_date: date,
         commodity: Commodity,
         scenarios: list[StressScenario] | None = None,
+        *,
+        actor: User,
     ) -> list[StressResult]:
+        await self._entitlement_service.assert_can_access_book(actor, book_id)
         _curve, price_by_bucket, revalue = await self._curve_context(book_id, as_of_date, commodity)
         return run_stress_scenarios(price_by_bucket, revalue, scenarios)
 
     async def compute_pnl_attribution(
-        self, book_id: uuid.UUID, prior_date: date, current_date: date, commodity: Commodity
+        self,
+        book_id: uuid.UUID,
+        prior_date: date,
+        current_date: date,
+        commodity: Commodity,
+        *,
+        actor: User,
     ) -> PnlAttribution:
+        await self._entitlement_service.assert_can_access_book(actor, book_id)
         prior_curve = await self._market_data_repo.get_published_curve(commodity, prior_date)
         current_curve = await self._market_data_repo.get_published_curve(commodity, current_date)
         if current_curve is None:
@@ -198,10 +234,11 @@ class RiskService:
         return attribute_pnl(snapshots, prior_date, current_date, prior_prices, current_prices)
 
     async def compute_option_greeks(
-        self, book_id: uuid.UUID, as_of_date: date, commodity: Commodity
+        self, book_id: uuid.UUID, as_of_date: date, commodity: Commodity, *, actor: User
     ) -> list[tuple[Trade, OptionGreeks]]:
         """Per-trade Black-76 greeks for every live OPTION trade in the book, using the
         published curve's price at each trade's expiry-month bucket as the forward."""
+        await self._entitlement_service.assert_can_access_book(actor, book_id)
         curve = await self._market_data_repo.get_published_curve(commodity, as_of_date)
         if curve is None:
             raise NotFoundError("ForwardCurve", f"{commodity}@{as_of_date}")

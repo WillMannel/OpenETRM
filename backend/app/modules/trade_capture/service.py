@@ -34,6 +34,7 @@ from app.common.enums import (
 from app.common.exceptions import NotFoundError, ValidationFailedError
 from app.modules.audit.service import record_audit_event
 from app.modules.auth.models import User
+from app.modules.entitlements.service import EntitlementService
 from app.modules.limits.service import LimitService
 from app.modules.trade_capture.models import Book, Counterparty, Trade, TradeChangeRequest
 from app.modules.trade_capture.repository import (
@@ -152,8 +153,10 @@ class TradeCaptureService:
         self._repo = TradeRepository(session)
         self._change_repo = TradeChangeRequestRepository(session)
         self._limit_service = LimitService(session)
+        self._entitlement_service = EntitlementService(session)
 
     async def create_trade(self, payload: TradeCreate, actor: User) -> Trade:
+        await self._entitlement_service.assert_can_access_book(actor, payload.book_id)
         trade = Trade(**payload.model_dump(), created_by_user_id=actor.id)
         trade = await self._repo.add(trade)
         await record_audit_event(
@@ -168,19 +171,31 @@ class TradeCaptureService:
         await self._session.refresh(trade, attribute_names=["counterparty", "book"])
         return trade
 
-    async def get_trade(self, trade_id: uuid.UUID) -> Trade:
+    async def get_trade(self, trade_id: uuid.UUID, actor: User) -> Trade:
         trade = await self._repo.get(trade_id)
         if trade is None:
             raise NotFoundError("Trade", trade_id)
+        await self._entitlement_service.assert_can_access_book(actor, trade.book_id)
         return trade
 
     async def list_trades(
-        self, *, book_id: uuid.UUID | None = None, limit: int = 100, offset: int = 0
+        self,
+        *,
+        actor: User,
+        book_id: uuid.UUID | None = None,
+        limit: int = 100,
+        offset: int = 0,
     ) -> list[Trade]:
-        return await self._repo.list(book_id=book_id, limit=limit, offset=offset)
+        if book_id is not None:
+            await self._entitlement_service.assert_can_access_book(actor, book_id)
+            return await self._repo.list(book_id=book_id, limit=limit, offset=offset)
+        # No specific book requested -- scope the whole-portfolio listing to whatever
+        # this user is entitled to see, rather than leaking every desk's trades.
+        accessible = await self._entitlement_service.accessible_book_ids(actor)
+        return await self._repo.list(book_ids=accessible, limit=limit, offset=offset)
 
     async def confirm_trade(self, trade_id: uuid.UUID, actor: User) -> Trade:
-        trade = await self.get_trade(trade_id)
+        trade = await self.get_trade(trade_id, actor)
         if trade.status != TradeStatus.NEW:
             raise ValidationFailedError(f"cannot confirm a trade in status {trade.status}")
 
@@ -210,7 +225,7 @@ class TradeCaptureService:
     async def request_amendment(
         self, trade_id: uuid.UUID, payload: AmendmentRequestCreate, actor: User
     ) -> TradeChangeRequest:
-        trade = await self.get_trade(trade_id)
+        trade = await self.get_trade(trade_id, actor)
         if trade.status != TradeStatus.CONFIRMED:
             raise ValidationFailedError("can only request an amendment on a CONFIRMED trade")
 
@@ -250,7 +265,7 @@ class TradeCaptureService:
     async def request_cancellation(
         self, trade_id: uuid.UUID, payload: CancellationRequestCreate, actor: User
     ) -> TradeChangeRequest:
-        trade = await self.get_trade(trade_id)
+        trade = await self.get_trade(trade_id, actor)
         if trade.status != TradeStatus.CONFIRMED:
             raise ValidationFailedError("can only request cancellation on a CONFIRMED trade")
 
@@ -280,22 +295,28 @@ class TradeCaptureService:
         await self._session.refresh(change_request)
         return change_request
 
-    async def list_pending_change_requests(self) -> list[TradeChangeRequest]:
-        return await self._change_repo.list_pending()
+    async def list_pending_change_requests(self, actor: User) -> list[TradeChangeRequest]:
+        accessible = await self._entitlement_service.accessible_book_ids(actor)
+        return await self._change_repo.list_pending(book_ids=accessible)
 
-    async def get_change_request(self, change_request_id: uuid.UUID) -> TradeChangeRequest:
+    async def get_change_request(
+        self, change_request_id: uuid.UUID, actor: User
+    ) -> TradeChangeRequest:
         change_request = await self._change_repo.get(change_request_id)
         if change_request is None:
             raise NotFoundError("TradeChangeRequest", change_request_id)
+        # get_trade enforces entitlement on the change request's underlying trade --
+        # a change request is only ever visible to someone who could see that trade.
+        await self.get_trade(change_request.trade_id, actor)
         return change_request
 
     async def approve_change_request(
         self, change_request_id: uuid.UUID, actor: User, note: str | None
     ) -> TradeChangeRequest:
-        change_request = await self.get_change_request(change_request_id)
+        change_request = await self.get_change_request(change_request_id, actor)
         self._check_pending_and_four_eyes(change_request, actor)
 
-        trade = await self.get_trade(change_request.trade_id)
+        trade = await self.get_trade(change_request.trade_id, actor)
         before = _trade_snapshot(trade)
 
         if change_request.change_type == ChangeRequestType.AMENDMENT:
@@ -348,10 +369,10 @@ class TradeCaptureService:
     async def reject_change_request(
         self, change_request_id: uuid.UUID, actor: User, note: str | None
     ) -> TradeChangeRequest:
-        change_request = await self.get_change_request(change_request_id)
+        change_request = await self.get_change_request(change_request_id, actor)
         self._check_pending_and_four_eyes(change_request, actor)
 
-        trade = await self.get_trade(change_request.trade_id)
+        trade = await self.get_trade(change_request.trade_id, actor)
         before = _trade_snapshot(trade)
         trade.status = TradeStatus.CONFIRMED  # revert to the pre-request state
         await self._session.flush()

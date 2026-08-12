@@ -31,10 +31,14 @@ class LimitRepository:
         result = await self._session.execute(stmt)
         return result.scalars().first()
 
-    async def list_for_book(self, book_id: uuid.UUID | None = None) -> list[BookLimit]:
+    async def list_for_book(
+        self, book_id: uuid.UUID | None = None, book_ids: set[uuid.UUID] | None = None
+    ) -> list[BookLimit]:
         stmt = select(BookLimit).order_by(BookLimit.created_at)
         if book_id is not None:
             stmt = stmt.where(BookLimit.book_id == book_id)
+        if book_ids is not None:
+            stmt = stmt.where(BookLimit.book_id.in_(book_ids))
         result = await self._session.execute(stmt)
         return list(result.scalars().all())
 
@@ -53,7 +57,9 @@ class LimitBreachRepository:
     async def get(self, breach_id: uuid.UUID) -> LimitBreach | None:
         return await self._session.get(LimitBreach, breach_id)
 
-    async def list_open(self, book_id: uuid.UUID | None = None) -> list[LimitBreach]:
+    async def list_open(
+        self, book_id: uuid.UUID | None = None, book_ids: set[uuid.UUID] | None = None
+    ) -> list[LimitBreach]:
         stmt = (
             select(LimitBreach)
             .where(LimitBreach.status == LimitBreachStatus.OPEN)
@@ -61,5 +67,7 @@ class LimitBreachRepository:
         )
         if book_id is not None:
             stmt = stmt.where(LimitBreach.book_id == book_id)
+        if book_ids is not None:
+            stmt = stmt.where(LimitBreach.book_id.in_(book_ids))
         result = await self._session.execute(stmt)
         return list(result.scalars().all())

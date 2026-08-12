@@ -35,6 +35,9 @@ class ReferenceDataRepository:
         result = await self._session.execute(select(Book).order_by(Book.name))
         return list(result.scalars().all())
 
+    async def get_book(self, book_id: uuid.UUID) -> Book | None:
+        return await self._session.get(Book, book_id)
+
 
 class TradeRepository:
     def __init__(self, session: AsyncSession):
@@ -52,11 +55,23 @@ class TradeRepository:
         return await self._session.get(Trade, trade_id)
 
     async def list(
-        self, *, book_id: uuid.UUID | None = None, limit: int = 100, offset: int = 0
+        self,
+        *,
+        book_id: uuid.UUID | None = None,
+        book_ids: builtins.set[uuid.UUID] | None = None,
+        limit: int = 100,
+        offset: int = 0,
     ) -> list[Trade]:
+        """`book_id` scopes to one book; `book_ids` scopes to a set (used to filter to
+        a caller's entitled books when no single book_id was requested -- see
+        EntitlementService.accessible_book_ids). Passing both is redundant but not a
+        conflict: both clauses AND together, same as any other combination of filters
+        on this query."""
         stmt = select(Trade).order_by(Trade.trade_date.desc()).limit(limit).offset(offset)
         if book_id is not None:
             stmt = stmt.where(Trade.book_id == book_id)
+        if book_ids is not None:
+            stmt = stmt.where(Trade.book_id.in_(book_ids))
         result = await self._session.execute(stmt)
         return list(result.scalars().all())
 
@@ -99,11 +114,21 @@ class TradeChangeRequestRepository:
     async def get(self, change_request_id: uuid.UUID) -> TradeChangeRequest | None:
         return await self._session.get(TradeChangeRequest, change_request_id)
 
-    async def list_pending(self) -> list[TradeChangeRequest]:
-        stmt = (
-            select(TradeChangeRequest)
-            .where(TradeChangeRequest.status == ChangeRequestStatus.PENDING)
-            .order_by(TradeChangeRequest.requested_at)
+    async def list_pending(
+        self, book_ids: builtins.set[uuid.UUID] | None = None
+    ) -> list[TradeChangeRequest]:
+        """`book_ids=None` returns every pending request (ADMIN's unrestricted view);
+        otherwise scoped to change requests on trades in one of those books -- a
+        RISK_MANAGER on desk A must not see (or approve/reject) desk B's pending
+        amendment/cancellation reasons. Joins to Trade only to filter; the result rows
+        are still TradeChangeRequest objects."""
+        stmt = select(TradeChangeRequest).where(
+            TradeChangeRequest.status == ChangeRequestStatus.PENDING
         )
+        if book_ids is not None:
+            stmt = stmt.join(Trade, Trade.id == TradeChangeRequest.trade_id).where(
+                Trade.book_id.in_(book_ids)
+            )
+        stmt = stmt.order_by(TradeChangeRequest.requested_at)
         result = await self._session.execute(stmt)
         return list(result.scalars().all())

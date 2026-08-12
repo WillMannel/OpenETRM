@@ -18,6 +18,7 @@ from app.common.enums import LINEAR_TRADE_TYPES, BuySell, Commodity, TradeType
 from app.common.exceptions import NotFoundError
 from app.core.config import get_settings
 from app.modules.auth.models import User
+from app.modules.entitlements.service import EntitlementService
 from app.modules.market_data.repository import MarketDataRepository
 from app.modules.trade_capture.models import Trade
 from app.modules.trade_capture.repository import TradeRepository
@@ -50,6 +51,7 @@ class ValuationService:
         self._session = session
         self._market_data_repo = MarketDataRepository(session)
         self._trade_repo = TradeRepository(session)
+        self._entitlement_service = EntitlementService(session)
 
     async def _trades_for_book(self, book_id: uuid.UUID, commodity: Commodity) -> list[Trade]:
         """Only LIVE_TRADE_STATUSES count -- a draft (NEW), superseded (AMENDED), or
@@ -162,14 +164,17 @@ class ValuationService:
         )
 
     async def compute_mark_to_market(
-        self, book_id: uuid.UUID, as_of_date: date, commodity: Commodity
+        self, book_id: uuid.UUID, as_of_date: date, commodity: Commodity, actor: User
     ) -> MarkToMarketComputation:
         """Pure computation: builds `Position`/`ValuationResult` objects in memory and
         returns them -- never calls `session.add`/`commit`. This is the piece that
         used to be entangled with persistence inside the old `mark_to_market`, which a
         read-only GET endpoint called on every request; calling this method has no
         side effects no matter how many times it's called (see
-        tests/integration/test_valuation_run_idempotency.py)."""
+        tests/integration/test_valuation_run_idempotency.py). Still checks entitlement
+        (see app.modules.entitlements) even though it's a pure read -- "no side
+        effects" doesn't mean "no access control"."""
+        await self._entitlement_service.assert_can_access_book(actor, book_id)
         curve = await self._market_data_repo.get_published_curve(commodity, as_of_date)
         if curve is None:
             raise NotFoundError("ForwardCurve", f"{commodity}@{as_of_date}")
@@ -212,12 +217,12 @@ class ValuationService:
         return MarkToMarketComputation(curve_id=curve.id, positions=positions, results=results)
 
     async def mark_to_market(
-        self, book_id: uuid.UUID, as_of_date: date, commodity: Commodity
+        self, book_id: uuid.UUID, as_of_date: date, commodity: Commodity, actor: User
     ) -> tuple[list[Position], list[ValuationResult]]:
         """Back-compat pure wrapper around compute_mark_to_market -- computes but does
         NOT persist. This is what the read-only GET /positions/{book_id}/pnl endpoint
         calls: safe to call any number of times, never writes a row."""
-        computation = await self.compute_mark_to_market(book_id, as_of_date, commodity)
+        computation = await self.compute_mark_to_market(book_id, as_of_date, commodity, actor)
         return computation.positions, computation.results
 
     async def persist_valuation_run(
@@ -225,7 +230,7 @@ class ValuationService:
         book_id: uuid.UUID,
         as_of_date: date,
         commodity: Commodity,
-        actor: User | None = None,
+        actor: User,
     ) -> tuple[ValuationRun, MarkToMarketComputation]:
         """The deliberate write path: computes fresh (via compute_mark_to_market) and
         persists a new ValuationRun plus its Position/ValuationResult rows in one
@@ -235,14 +240,14 @@ class ValuationService:
         (see v_positions_flat/v_valuation_results_flat and ExportService). Returns the
         persisted run alongside the computation so callers don't need a second query
         to render the numbers just written."""
-        computation = await self.compute_mark_to_market(book_id, as_of_date, commodity)
+        computation = await self.compute_mark_to_market(book_id, as_of_date, commodity, actor)
 
         run = ValuationRun(
             book_id=book_id,
             commodity=commodity,
             as_of_date=as_of_date,
             curve_id=computation.curve_id,
-            computed_by_user_id=actor.id if actor else None,
+            computed_by_user_id=actor.id,
         )
         self._session.add(run)
         await self._session.flush()  # assigns run.id without ending the transaction

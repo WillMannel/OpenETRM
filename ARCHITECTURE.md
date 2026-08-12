@@ -110,6 +110,9 @@ FTRs, BTM PPA economics) that this deliberately doesn't attempt yet.
 7. **Observability** (`app/core/logging.py`, `metrics.py`, `middleware.py`) —
    structured JSON logs with a per-request correlation id, Prometheus metrics, and a
    liveness/readiness split. See "Observability" below.
+8. **Book-level entitlements** (`modules/entitlements`) — desks, per-book membership
+   grants, and the service-layer enforcement that turns them into real "Chinese
+   walls." See "Book-level entitlements" below.
 
 Explicitly **out of scope** for v1 (see `FUTURE_WORK.md` for a design sketch of each):
 full deal settlement/invoicing, regulatory reporting, credit risk/margining, physical
@@ -127,16 +130,45 @@ the route level:
 | RISK_MANAGER | + confirm trades, run risk (VaR/stress/attribution), approve/reject change requests |
 | ADMIN | + provision users with any role (`POST /auth/users`) |
 
-There's no per-book ACL yet — any authenticated user can see any book/trade; the roles
-above gate *actions*, not *visibility*. The first admin is provisioned out-of-band via
-`backend/scripts/create_admin.py` (chicken-and-egg: creating a user with an elevated
-role itself requires an admin caller).
+The roles above gate *actions*; *visibility* into a specific book is a separate,
+orthogonal concern -- see "Book-level entitlements" below. The first admin is
+provisioned out-of-band via `backend/scripts/create_admin.py` (chicken-and-egg:
+creating a user with an elevated role itself requires an admin caller).
 
 Every trade lifecycle transition (create, confirm, request amendment/cancellation,
 approve/reject) writes an `audit_log` row (`app/modules/audit`) in the *same
 transaction* as the change itself — see `TradeCaptureService`, which flushes the state
 change and the audit entry together before a single commit, so the two can never
 disagree. `GET /audit/{entity_type}/{entity_id}` returns the full history.
+
+### Book-level entitlements (desk separation / "Chinese walls")
+
+`app/modules/entitlements` gates *visibility*: whether a given user may see or act on
+a specific book at all, orthogonal to the role-based *action* gating above. A book is
+unrestricted by default — any authenticated user with the right role may access it,
+exactly today's pre-existing behavior — until it's assigned to a `Desk` (`Book.desk_id`
+set via `PUT /books/{book_id}/desk`, ADMIN-only). Once assigned, only ADMIN or a user
+holding an explicit `BookMembership` grant for that book (`POST/DELETE
+/books/{book_id}/members`, also ADMIN-only) may access it. This is a deliberate
+opt-in: it lets an operator wall off individual desks without every existing
+book/deployment losing access the moment the feature ships.
+
+Enforcement lives in the *service* layer, not routers — `TradeCaptureService`,
+`ValuationService`, `RiskService`, `LimitService`, and `ExportService` each call
+`EntitlementService.assert_can_access_book` (a single book) or
+`.accessible_book_ids` (filtering a whole-portfolio listing/export to what the caller
+can see) before touching book-scoped data, the same way volume-limit enforcement lives
+in `TradeCaptureService` rather than being duplicated per route. A denied check raises
+`ForbiddenError`, mapped to a 403 at the router layer (distinct from `require_role`'s
+403 for the wrong role, and from a 404 for a book that doesn't exist at all). A
+portfolio-wide risk run (`book_id=None`, across every book) is ADMIN-only outright,
+since there's no single book to check and silently narrowing it to "just the caller's
+accessible books" would be a different number under the same "portfolio-wide" label.
+
+The direct-Postgres reporting role (`INTEGRATIONS.md`) does **not** enforce these
+walls — it's a single shared, enterprise-wide read role that doesn't authenticate as
+an individual user. See `FUTURE_WORK.md` §9 for what real BI-side row-level security
+would take.
 
 ### Trade lifecycle
 
@@ -362,6 +394,7 @@ backend/app/
     risk/          VaR (historical/parametric/Monte Carlo), sensitivities, stress
                     testing, P&L attribution, option greeks
     limits/        book+commodity VOLUME/VAR limits and breach tracking
+    entitlements/  desks, book memberships, "Chinese wall" enforcement
     export/        bulk CSV/JSON/Parquet extracts for BI/pipeline tools
   tasks/           Arq worker + background jobs (curve calibration, VaR runs)
 backend/scripts/   create_admin.py -- bootstrap the first ADMIN user

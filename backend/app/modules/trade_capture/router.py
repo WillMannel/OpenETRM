@@ -5,7 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user, get_db, require_role
 from app.common.enums import UserRole
-from app.common.exceptions import NotFoundError, ValidationFailedError
+from app.common.exceptions import ForbiddenError, NotFoundError, ValidationFailedError
 from app.modules.auth.models import User
 from app.modules.trade_capture.schemas import (
     AmendmentRequestCreate,
@@ -74,7 +74,12 @@ async def create_trade(
     actor: User = Depends(_TRADER_OR_ADMIN),
 ) -> TradeRead:
     service = TradeCaptureService(session)
-    trade = await service.create_trade(payload, actor)
+    try:
+        trade = await service.create_trade(payload, actor)
+    except NotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ForbiddenError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
     return TradeRead.model_validate(trade)
 
 
@@ -84,10 +89,15 @@ async def list_trades(
     limit: int = 100,
     offset: int = 0,
     session: AsyncSession = Depends(get_db),
-    _user: User = Depends(get_current_user),
+    actor: User = Depends(get_current_user),
 ) -> list[TradeRead]:
     service = TradeCaptureService(session)
-    trades = await service.list_trades(book_id=book_id, limit=limit, offset=offset)
+    try:
+        trades = await service.list_trades(actor=actor, book_id=book_id, limit=limit, offset=offset)
+    except NotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ForbiddenError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
     return [TradeRead.model_validate(t) for t in trades]
 
 
@@ -95,13 +105,15 @@ async def list_trades(
 async def get_trade(
     trade_id: uuid.UUID,
     session: AsyncSession = Depends(get_db),
-    _user: User = Depends(get_current_user),
+    actor: User = Depends(get_current_user),
 ) -> TradeRead:
     service = TradeCaptureService(session)
     try:
-        trade = await service.get_trade(trade_id)
+        trade = await service.get_trade(trade_id, actor)
     except NotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ForbiddenError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
     return TradeRead.model_validate(trade)
 
 
@@ -118,6 +130,8 @@ async def confirm_trade(
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ValidationFailedError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except ForbiddenError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
     return TradeRead.model_validate(trade)
 
 
@@ -135,6 +149,8 @@ async def request_amendment(
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ValidationFailedError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except ForbiddenError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
     return TradeChangeRequestRead.model_validate(change_request)
 
 
@@ -152,17 +168,19 @@ async def request_cancellation(
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ValidationFailedError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except ForbiddenError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
     return TradeChangeRequestRead.model_validate(change_request)
 
 
 @change_requests_router.get("", response_model=list[TradeChangeRequestRead])
 async def list_pending_change_requests(
-    session: AsyncSession = Depends(get_db), _actor: User = Depends(_RISK_OR_ADMIN)
+    session: AsyncSession = Depends(get_db), actor: User = Depends(_RISK_OR_ADMIN)
 ) -> list[TradeChangeRequestRead]:
     service = TradeCaptureService(session)
     return [
         TradeChangeRequestRead.model_validate(c)
-        for c in await service.list_pending_change_requests()
+        for c in await service.list_pending_change_requests(actor)
     ]
 
 
@@ -170,13 +188,15 @@ async def list_pending_change_requests(
 async def get_change_request(
     change_request_id: uuid.UUID,
     session: AsyncSession = Depends(get_db),
-    _user: User = Depends(get_current_user),
+    actor: User = Depends(get_current_user),
 ) -> TradeChangeRequestRead:
     service = TradeCaptureService(session)
     try:
-        change_request = await service.get_change_request(change_request_id)
+        change_request = await service.get_change_request(change_request_id, actor)
     except NotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ForbiddenError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
     return TradeChangeRequestRead.model_validate(change_request)
 
 
@@ -196,6 +216,8 @@ async def approve_change_request(
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ValidationFailedError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except ForbiddenError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
     return TradeChangeRequestRead.model_validate(change_request)
 
 
@@ -213,4 +235,6 @@ async def reject_change_request(
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ValidationFailedError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except ForbiddenError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
     return TradeChangeRequestRead.model_validate(change_request)

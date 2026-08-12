@@ -22,6 +22,7 @@ from app.common.enums import AuditAction, Commodity, LimitBreachStatus, LimitTyp
 from app.common.exceptions import NotFoundError, ValidationFailedError
 from app.modules.audit.service import record_audit_event
 from app.modules.auth.models import User
+from app.modules.entitlements.service import EntitlementService
 from app.modules.limits.models import BookLimit, LimitBreach
 from app.modules.limits.repository import LimitBreachRepository, LimitRepository
 from app.modules.limits.schemas import BookLimitCreate
@@ -36,8 +37,10 @@ class LimitService:
         self._session = session
         self._limit_repo = LimitRepository(session)
         self._breach_repo = LimitBreachRepository(session)
+        self._entitlement_service = EntitlementService(session)
 
     async def create_or_update_limit(self, payload: BookLimitCreate, actor: User) -> BookLimit:
+        await self._entitlement_service.assert_can_access_book(actor, payload.book_id)
         existing = await self._limit_repo.get_by_book_and_type(
             payload.book_id, payload.commodity, payload.limit_type
         )
@@ -56,11 +59,21 @@ class LimitService:
         )
         return await self._limit_repo.add(limit)
 
-    async def list_limits(self, book_id: uuid.UUID | None = None) -> list[BookLimit]:
-        return await self._limit_repo.list_for_book(book_id)
+    async def list_limits(self, actor: User, book_id: uuid.UUID | None = None) -> list[BookLimit]:
+        if book_id is not None:
+            await self._entitlement_service.assert_can_access_book(actor, book_id)
+            return await self._limit_repo.list_for_book(book_id)
+        accessible = await self._entitlement_service.accessible_book_ids(actor)
+        return await self._limit_repo.list_for_book(book_ids=accessible)
 
-    async def list_open_breaches(self, book_id: uuid.UUID | None = None) -> list[LimitBreach]:
-        return await self._breach_repo.list_open(book_id)
+    async def list_open_breaches(
+        self, actor: User, book_id: uuid.UUID | None = None
+    ) -> list[LimitBreach]:
+        if book_id is not None:
+            await self._entitlement_service.assert_can_access_book(actor, book_id)
+            return await self._breach_repo.list_open(book_id)
+        accessible = await self._entitlement_service.accessible_book_ids(actor)
+        return await self._breach_repo.list_open(book_ids=accessible)
 
     async def acknowledge_breach(
         self, breach_id: uuid.UUID, actor: User, note: str | None
@@ -68,6 +81,7 @@ class LimitService:
         breach = await self._breach_repo.get(breach_id)
         if breach is None:
             raise NotFoundError("LimitBreach", breach_id)
+        await self._entitlement_service.assert_can_access_book(actor, breach.book_id)
         if breach.status != LimitBreachStatus.OPEN:
             raise ValidationFailedError(f"breach is already {breach.status}")
 

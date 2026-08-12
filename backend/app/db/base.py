@@ -16,6 +16,7 @@ class Base(DeclarativeBase):
 # trades, which FK to both).
 from app.modules.audit import models as _audit_models  # noqa: E402,F401
 from app.modules.auth import models as _auth_models  # noqa: E402,F401
+from app.modules.entitlements import models as _entitlements_models  # noqa: E402,F401
 from app.modules.limits import models as _limits_models  # noqa: E402,F401
 from app.modules.market_data import models as _market_data_models  # noqa: E402,F401
 from app.modules.risk import models as _risk_models  # noqa: E402,F401

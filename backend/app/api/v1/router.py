@@ -2,6 +2,7 @@ from fastapi import APIRouter
 
 from app.modules.audit.router import router as audit_router
 from app.modules.auth.router import router as auth_router
+from app.modules.entitlements.router import router as entitlements_router
 from app.modules.export.router import router as export_router
 from app.modules.limits.router import router as limits_router
 from app.modules.market_data.router import router as market_data_router
@@ -15,6 +16,7 @@ api_router.include_router(auth_router)
 api_router.include_router(trade_capture_router)
 api_router.include_router(change_requests_router)
 api_router.include_router(reference_data_router)
+api_router.include_router(entitlements_router)
 api_router.include_router(market_data_router)
 api_router.include_router(valuation_router)
 api_router.include_router(risk_router)

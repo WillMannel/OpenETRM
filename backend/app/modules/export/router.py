@@ -1,16 +1,22 @@
 """Bulk export endpoints -- the REST/HTTP integration path. Any authenticated role can
-read (matches the existing "VIEWER: read everything" convention), including an
+call these (matches the existing "VIEWER: read everything" convention), including an
 API-key-authenticated service account, which is the expected caller for most of these:
-a Fabric Data Factory pipeline, a Power BI scheduled refresh, or similar."""
+a Fabric Data Factory pipeline, a Power BI scheduled refresh, or similar. What each
+caller actually sees is still book-entitlement-scoped (see app.modules.entitlements):
+an unfiltered export returns only the caller's accessible books' rows, and an export
+scoped to a specific book_id 403s if the caller isn't entitled to it -- unlike the
+direct-Postgres reporting role (see INTEGRATIONS.md), this REST path authenticates as
+an individual OpenETRM user/service account, so desk walls apply to it."""
 
 import uuid
 from datetime import date, datetime
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user, get_db
+from app.common.exceptions import ForbiddenError, NotFoundError
 from app.modules.auth.models import User
 from app.modules.export.serialization import ExportFormat, rows_to_response
 from app.modules.export.service import ExportService
@@ -28,12 +34,17 @@ async def export_trades(
     limit: int = Query(default=1000, le=_MAX_LIMIT),
     offset: int = 0,
     session: AsyncSession = Depends(get_db),
-    _user: User = Depends(get_current_user),
+    actor: User = Depends(get_current_user),
 ) -> Response:
     service = ExportService(session)
-    rows = await service.trades(
-        book_id=book_id, updated_since=updated_since, limit=limit, offset=offset
-    )
+    try:
+        rows = await service.trades(
+            actor=actor, book_id=book_id, updated_since=updated_since, limit=limit, offset=offset
+        )
+    except NotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ForbiddenError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
     return rows_to_response(rows, format, "trades")
 
 
@@ -45,12 +56,17 @@ async def export_positions(
     limit: int = Query(default=1000, le=_MAX_LIMIT),
     offset: int = 0,
     session: AsyncSession = Depends(get_db),
-    _user: User = Depends(get_current_user),
+    actor: User = Depends(get_current_user),
 ) -> Response:
     service = ExportService(session)
-    rows = await service.positions(
-        as_of_date=as_of_date, book_id=book_id, limit=limit, offset=offset
-    )
+    try:
+        rows = await service.positions(
+            actor=actor, as_of_date=as_of_date, book_id=book_id, limit=limit, offset=offset
+        )
+    except NotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ForbiddenError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
     return rows_to_response(rows, format, "positions")
 
 
@@ -62,12 +78,17 @@ async def export_valuation_results(
     limit: int = Query(default=1000, le=_MAX_LIMIT),
     offset: int = 0,
     session: AsyncSession = Depends(get_db),
-    _user: User = Depends(get_current_user),
+    actor: User = Depends(get_current_user),
 ) -> Response:
     service = ExportService(session)
-    rows = await service.valuation_results(
-        book_id=book_id, updated_since=updated_since, limit=limit, offset=offset
-    )
+    try:
+        rows = await service.valuation_results(
+            actor=actor, book_id=book_id, updated_since=updated_since, limit=limit, offset=offset
+        )
+    except NotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ForbiddenError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
     return rows_to_response(rows, format, "valuation_results")
 
 
@@ -79,10 +100,15 @@ async def export_var_results(
     limit: int = Query(default=1000, le=_MAX_LIMIT),
     offset: int = 0,
     session: AsyncSession = Depends(get_db),
-    _user: User = Depends(get_current_user),
+    actor: User = Depends(get_current_user),
 ) -> Response:
     service = ExportService(session)
-    rows = await service.var_results(
-        book_id=book_id, updated_since=updated_since, limit=limit, offset=offset
-    )
+    try:
+        rows = await service.var_results(
+            actor=actor, book_id=book_id, updated_since=updated_since, limit=limit, offset=offset
+        )
+    except NotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ForbiddenError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
     return rows_to_response(rows, format, "var_results")

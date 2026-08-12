@@ -227,6 +227,40 @@ AD app registration to authenticate against -- there's no way to responsibly bui
 and claim it works without that, so it stays a sketch until someone has one to build
 against.
 
+## 9. Desk-wide entitlement grants and BI-side row-level security
+
+**Scope**: `app.modules.entitlements` (book-level "Chinese walls") ships two
+deliberate simplifications worth widening later:
+
+- **Desk-wide membership grants**: today, entitlement to a walled book is granted
+  per-book (`BookMembership`), even though books already belong to a `Desk`. A trader
+  who joins a 20-book desk needs 20 grants instead of one "join this desk" grant. A
+  `DeskMembership` entity (mirroring `BookMembership` but keyed on `desk_id`) with
+  `EntitlementService.assert_can_access_book` checking it as a second path alongside
+  `BookMembership` is a small, additive change once there's a real desk with enough
+  books that per-book grants become tedious.
+- **BI-side row-level security**: `EntitlementService` enforces desk separation in the
+  application/API layer, but the direct-Postgres reporting role
+  (`scripts/create_reporting_role.py`, see `INTEGRATIONS.md`) is intentionally a single
+  shared, enterprise-wide read role -- a Fabric/Power BI connection through it sees
+  every book's data in `v_positions_flat`/`v_trades_flat`/etc. regardless of desk walls,
+  because it doesn't authenticate as an individual OpenETRM user at all. Real row-level
+  BI entitlement would need either (a) a Postgres role per desk with a `USING
+  (desk_id = current_setting('app.desk_id'))` row-level-security policy on each base
+  table, provisioned and rotated per desk, or (b) a generated view per desk. Both are
+  real, buildable extensions of the existing `..._reporting_views.py` migration
+  pattern, deferred because provisioning/rotating per-desk Postgres credentials is an
+  operational process, not just a schema change, and no desk has asked for BI-level
+  separation yet -- see `app.modules.entitlements.service` for where the API-level
+  enforcement already lives if/when this is picked up.
+- **404 vs. 403 on a walled book an outsider doesn't know about**:
+  `EntitlementService.assert_can_access_book` currently returns 403 (not 404) for a
+  book that exists but the caller can't see, which technically confirms the book id is
+  valid to anyone probing it. A stricter implementation would 404 instead, matching
+  how `NotFoundError` is already used elsewhere -- deferred because it complicates the
+  common admin/support case of explaining *why* an access attempt failed, and no real
+  deployment has asked for it.
+
 ## Cross-cutting note
 
 All eight of these want the same two things the rest of the platform already has:

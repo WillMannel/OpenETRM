@@ -6,7 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user, get_db, require_role
 from app.common.enums import Commodity, UserRole
-from app.common.exceptions import NotFoundError
+from app.common.exceptions import ForbiddenError, NotFoundError
 from app.modules.auth.models import User
 from app.modules.valuation.schemas import (
     BookPnlSummary,
@@ -29,7 +29,7 @@ async def get_book_pnl(
     as_of_date: date,
     commodity: Commodity = Commodity.HENRY_HUB,
     session: AsyncSession = Depends(get_db),
-    _user: User = Depends(get_current_user),
+    actor: User = Depends(get_current_user),
 ) -> BookPnlSummary:
     """Pure read: computes mark-to-market fresh from live trades/the published curve
     and returns it -- never writes a row, so calling this any number of times has no
@@ -38,9 +38,11 @@ async def get_book_pnl(
     POST /positions/{book_id}/valuation-runs."""
     service = ValuationService(session)
     try:
-        positions, results = await service.mark_to_market(book_id, as_of_date, commodity)
+        positions, results = await service.mark_to_market(book_id, as_of_date, commodity, actor)
     except NotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ForbiddenError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
 
     return BookPnlSummary(
         book_id=book_id,
@@ -72,6 +74,8 @@ async def create_valuation_run(
         )
     except NotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ForbiddenError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
 
     return ValuationRunSummary(
         run=ValuationRunRead.model_validate(run),

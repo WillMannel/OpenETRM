@@ -36,6 +36,11 @@ class Book(Base):
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
     name: Mapped[str] = mapped_column(String(100), nullable=False, unique=True)
     description: Mapped[str | None] = mapped_column(String(500))
+    # NULL = unrestricted (any authenticated user with the right role may access this
+    # book, today's behavior). Setting this turns on entitlement enforcement -- only
+    # ADMIN or a user with a BookMembership for this book may access it from then on.
+    # See app.modules.entitlements for the full design rationale.
+    desk_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("desks.id"), nullable=True)
 
 
 class Trade(Base):

@@ -42,6 +42,9 @@ class BookRead(BaseModel):
     id: uuid.UUID
     name: str
     description: str | None = None
+    # None = unrestricted (no entitlement enforcement); set = only ADMIN or a
+    # BookMembership holder may access this book. See app.modules.entitlements.
+    desk_id: uuid.UUID | None = None
 
 
 class TradeCreate(BaseModel):

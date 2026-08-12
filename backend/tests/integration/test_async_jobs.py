@@ -11,11 +11,13 @@ from typing import Any
 
 import pytest
 from httpx import AsyncClient
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_arq_pool
 from app.common.enums import UserRole
 from app.main import app
+from app.modules.auth.models import User
 from app.modules.trade_capture.models import Book, Counterparty
 from tests.conftest import AuthHeadersFactory
 
@@ -52,6 +54,11 @@ async def _seed_book_and_counterparty(db_session: AsyncSession) -> tuple[str, st
     return str(counterparty.id), str(book.id)
 
 
+async def _user_id(db_session: AsyncSession, username: str) -> str:
+    user = (await db_session.execute(select(User).where(User.username == username))).scalar_one()
+    return str(user.id)
+
+
 @pytest.mark.asyncio
 async def test_build_curve_async_enqueues_calibrate_curve_job(
     client: AsyncClient,
@@ -77,7 +84,8 @@ async def test_run_var_async_enqueues_run_var_job(
     auth_headers: AuthHeadersFactory,
 ):
     _, book_id = await _seed_book_and_counterparty(db_session)
-    headers = await auth_headers(UserRole.RISK_MANAGER)
+    headers = await auth_headers(UserRole.RISK_MANAGER, username="var-async-user")
+    actor_id = await _user_id(db_session, "var-async-user")
 
     resp = await client.post(
         "/api/v1/risk/var/run-async",
@@ -88,7 +96,7 @@ async def test_run_var_async_enqueues_run_var_job(
     assert resp.status_code == 202
     assert resp.json()["job_id"] == "fake-job-1"
     assert fake_arq_pool.calls == [
-        ("run_var_job", (book_id, "2026-01-10", "HENRY_HUB", 99, 250)),
+        ("run_var_job", (book_id, "2026-01-10", "HENRY_HUB", 99, 250, actor_id)),
     ]
 
 
@@ -116,7 +124,8 @@ async def test_run_delta_ladder_async_enqueues_sensitivities_job(
     auth_headers: AuthHeadersFactory,
 ):
     _, book_id = await _seed_book_and_counterparty(db_session)
-    headers = await auth_headers(UserRole.RISK_MANAGER)
+    headers = await auth_headers(UserRole.RISK_MANAGER, username="ladder-async-user")
+    actor_id = await _user_id(db_session, "ladder-async-user")
 
     resp = await client.post(
         "/api/v1/risk/delta-ladder/run-async",
@@ -126,5 +135,5 @@ async def test_run_delta_ladder_async_enqueues_sensitivities_job(
 
     assert resp.status_code == 202
     assert fake_arq_pool.calls == [
-        ("run_sensitivities_job", (book_id, "2026-01-10", "HENRY_HUB")),
+        ("run_sensitivities_job", (book_id, "2026-01-10", "HENRY_HUB", actor_id)),
     ]
