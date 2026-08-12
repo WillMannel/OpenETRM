@@ -46,6 +46,27 @@ async def test_create_and_list_trade(
 
 
 @pytest.mark.asyncio
+async def test_list_trades_rejects_a_limit_above_the_enforced_maximum(
+    client: AsyncClient, db_session: AsyncSession, auth_headers: AuthHeadersFactory
+):
+    """Regression test for task P1-9 (see ARCHITECTURE.md's "Scale and
+    performance"): `limit` used to be a plain, unclamped `int`, so a caller could
+    pass an arbitrarily large value and force the server to materialize its entire
+    entitled trade set into memory. `_MAX_TRADE_LIST_LIMIT` in the router now
+    rejects anything past a sane cap with a 422, the same pattern
+    app.modules.export's bulk endpoints already used."""
+    viewer_headers = await auth_headers(UserRole.VIEWER)
+
+    too_large = await client.get(
+        "/api/v1/trades", params={"limit": 999_999_999}, headers=viewer_headers
+    )
+    assert too_large.status_code == 422
+
+    at_the_cap = await client.get("/api/v1/trades", params={"limit": 1000}, headers=viewer_headers)
+    assert at_the_cap.status_code == 200
+
+
+@pytest.mark.asyncio
 async def test_create_trade_requires_authentication(client: AsyncClient, db_session: AsyncSession):
     resp = await client.post("/api/v1/trades", json={})
     assert resp.status_code == 401

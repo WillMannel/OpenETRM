@@ -310,6 +310,53 @@ from what that task closed:
   between reproducibility and correctness, not a small addition -- deferred rather
   than picked hastily.
 
+## 12. Deferred scale/performance work
+
+**Scope**: task P1-9's index/N+1 audit and published benchmarks (`PERFORMANCE.md`,
+`ARCHITECTURE.md`'s "Scale and performance") fixed the concrete gaps it found --
+missing indexes, an unbounded `GET /trades` limit, an N+1 refresh loop -- but
+identified a few real, larger pieces deliberately left for later:
+
+- **Leaner projection queries for bulk trade reads**: `PERFORMANCE.md`'s benchmark
+  shows a portfolio-wide `TradeRepository.list_live` at 15,000 rows costs ~6ms for
+  the query itself (confirmed via a bare `COUNT(*)`) but ~1.2-1.4s once ORM
+  hydration is included -- `Trade.counterparty`/`.book` are `lazy="joined"`, so
+  every row eager-joins two more tables even when the caller (e.g.
+  `ValuationService.build_positions`, which only touches `volume`/`fixed_price`
+  /`buy_sell`/delivery dates) never needs the counterparty's name or the book's
+  description. A leaner query -- either a narrower column projection or
+  `lazy="selectin"` for bulk-list contexts specifically -- would close this, but
+  wasn't speculatively built without a concrete caller actually reaching this
+  scale in production; premature optimization here risks solving the wrong shape
+  of problem.
+- **Timescale compression + retention policies**: `market_data_points` is a bare
+  hypertable (Timescale's default 7-day chunking, no `add_compression_policy`/
+  `add_retention_policy`). Deferred for the same reason task P1-8's managed-secrets
+  item was: this sandbox has no `timescaledb` extension available to validate a
+  Timescale-specific migration end-to-end, and a retention period in particular is
+  a business/compliance decision (how long must market data be kept?) that
+  shouldn't be baked into a migration with an arbitrary default. Also missing:
+  continuous aggregates for the "most recent quote per delivery month" pattern
+  `MarketDataRepository.latest_quotes` currently recomputes via a full sort +
+  Python-side dedup on every call.
+- **Real load/concurrency testing**: `PERFORMANCE.md`'s benchmarks measure
+  single-request latency at realistic data volumes, not throughput under
+  concurrent load -- no connection-pool contention, no simulated multiple traders
+  hitting the API at once. `tests/integration/test_limit_concurrency.py` (task
+  P0-5) proves *correctness* under genuine concurrent Postgres connections but
+  isn't a throughput benchmark. Adopting a real load-testing tool (locust or k6;
+  neither is a dependency today) and running it against a docker-compose stack
+  would be the natural next step, ideally wired into CI as a non-blocking
+  informational job rather than a merge gate (perf numbers are noisy on shared CI
+  runners).
+- **Async (worker-backed) variants for stress-test/P&L-attribution/option-greeks**:
+  these three endpoints run their quant math directly on the request-handling
+  event loop with no Arq-backed alternative, unlike curve-build/VaR/delta-ladder
+  (see `ARCHITECTURE.md`'s "Async job endpoints"). Not an issue at v1's scale
+  (`PERFORMANCE.md` shows all VaR methods finish in single-digit milliseconds at a
+  realistic panel), but the natural next candidates once book/scenario sizes grow
+  enough that blocking the event loop for their duration becomes noticeable.
+
 ## Cross-cutting note
 
 All eight of these want the same two things the rest of the platform already has:

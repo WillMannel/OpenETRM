@@ -371,7 +371,12 @@ class RiskService:
             self._session.add(result)
             results.append(result)
         if results:
+            # No per-row refresh() loop here (see task P1-9, ARCHITECTURE.md's
+            # "Scale and performance") -- every field OptionGreeksRead actually
+            # exposes is already set on `result` before commit (id is a
+            # client-side default, everything else was computed above); the only
+            # server-generated column is computed_at, which isn't in the response.
+            # A refresh-per-row here would be N sequential round trips for a book
+            # with N live option trades, for zero information gain.
             await self._session.commit()
-            for r in results:
-                await self._session.refresh(r)
         return results

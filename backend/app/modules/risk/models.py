@@ -2,7 +2,7 @@ import uuid
 from datetime import date, datetime
 from decimal import Decimal
 
-from sqlalchemy import JSON, Date, DateTime, ForeignKey, Integer, Numeric, String, func
+from sqlalchemy import JSON, Date, DateTime, ForeignKey, Index, Integer, Numeric, String, func
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -23,6 +23,11 @@ _JSON = JSON().with_variant(JSONB, "postgresql")
 
 class VarResult(Base):
     __tablename__ = "var_results"
+    # Previously had no supporting index at all beyond the PK -- a book-scoped
+    # history query (ExportService.var_results, or any future "VaR over time for
+    # this book" view) sequential-scanned the whole table. See task P1-9,
+    # ARCHITECTURE.md's "Scale and performance".
+    __table_args__ = (Index("ix_var_results_book_id", "book_id"),)
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
     book_id: Mapped[uuid.UUID | None] = mapped_column(
@@ -56,6 +61,7 @@ class VarResult(Base):
 
 class SensitivityResult(Base):
     __tablename__ = "sensitivity_results"
+    __table_args__ = (Index("ix_sensitivity_results_book_id", "book_id"),)
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
     book_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("books.id"), nullable=False)

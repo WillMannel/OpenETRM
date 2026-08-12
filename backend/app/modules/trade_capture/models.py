@@ -2,7 +2,7 @@ import uuid
 from datetime import date, datetime
 from decimal import Decimal
 
-from sqlalchemy import JSON, Date, DateTime, ForeignKey, Integer, Numeric, String, func
+from sqlalchemy import JSON, Date, DateTime, ForeignKey, Index, Integer, Numeric, String, func
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -46,6 +46,19 @@ class Book(Base):
 
 class Trade(Base):
     __tablename__ = "trades"
+    __table_args__ = (
+        # TradeRepository.list_live's two real call shapes (see task P1-9,
+        # ARCHITECTURE.md's "Scale and performance"): a single book scoped to a
+        # commodity (book_id given), or a portfolio-wide risk run scoped to a
+        # commodity (book_id=None -- every caller always passes a specific
+        # commodity, never both None). Neither is well served by the old
+        # book_id-only index once a book's amendment/cancellation history
+        # accumulates (every amendment is a *new* row -- see `version`/
+        # `previous_version_id` below -- so superseded rows pile up forever and
+        # shrink the live fraction of a book_id-only index scan over time).
+        Index("ix_trades_book_id_commodity_status", "book_id", "commodity", "status"),
+        Index("ix_trades_commodity_status", "commodity", "status"),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
     trade_date: Mapped[date] = mapped_column(Date, nullable=False)

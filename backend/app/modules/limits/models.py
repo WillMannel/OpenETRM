@@ -2,7 +2,7 @@ import uuid
 from datetime import date, datetime
 from decimal import Decimal
 
-from sqlalchemy import Date, DateTime, ForeignKey, Numeric, String, UniqueConstraint, func
+from sqlalchemy import Date, DateTime, ForeignKey, Index, Numeric, String, UniqueConstraint, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.common.enums import Commodity, LimitBreachStatus, LimitType
@@ -46,6 +46,11 @@ class LimitBreach(Base):
     so a VOLUME breach row records a rejected confirm attempt, not a live position."""
 
     __tablename__ = "limit_breaches"
+    # LimitBreachRepository.list_open always filters on status, optionally book_id --
+    # the pre-existing status-only index left book_id unindexed, so a book-scoped
+    # open-breaches lookup still had to filter every OPEN row across every book. See
+    # task P1-9, ARCHITECTURE.md's "Scale and performance".
+    __table_args__ = (Index("ix_limit_breaches_status_book_id", "status", "book_id"),)
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
     limit_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("book_limits.id"), nullable=False)

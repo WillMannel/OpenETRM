@@ -551,6 +551,68 @@ small enough that the sync path is fine) — they exist so heavier workloads hav
 somewhere to go without an API shape change. `app/core/jobs.py` has the pool/polling
 details.
 
+Stress testing, P&L attribution, and option greeks have **no async variant** today
+(`app/tasks/worker.py` only registers `calibrate_curve`/`run_var_job`/
+`run_sensitivities_job`) — both endpoints run the same class of quant math (Black-76,
+bump-and-revalue) VaR does, per-scenario/per-trade, directly on the request-handling
+event loop. Not an issue at v1's scale (see `PERFORMANCE.md` — all three VaR methods
+finish in single-digit milliseconds at a realistic panel size), but the next
+candidates for a worker-backed variant if book/scenario sizes grow. Tracked in
+`FUTURE_WORK.md`.
+
+### Scale and performance
+
+Task P1-9's index/N+1 audit and its results are published in `PERFORMANCE.md`
+(reproducible via `backend/scripts/benchmark_scale.py`) — read that for methodology
+and numbers. Summary of what changed:
+
+- **Indexes**: `TradeRepository.list_live` (the query behind position-building, VaR,
+  and pre-trade limit checks) has two real call shapes — a single book scoped to a
+  commodity, or a portfolio-wide risk run scoped to a commodity (every caller always
+  passes a specific commodity; `book_id`/`commodity` are never both unset
+  simultaneously in practice). The old book_id-only index only partially served the
+  first shape and not at all the second — a portfolio-wide (`book_id=None`) scan was
+  a full sequential scan of the entire `trades` table, including every historical
+  `AMENDED`/`CANCELLED` row an amendment ever created (amendments never mutate a row
+  in place — see `Trade.version`/`previous_version_id` — so superseded rows
+  accumulate forever). Added `ix_trades_book_id_commodity_status` and
+  `ix_trades_commodity_status` to cover both shapes; also added a `book_id` index to
+  `var_results`/`sensitivity_results` (previously none at all — their sibling tables
+  `stress_results`/`option_greeks_results` already had one) and a composite
+  `(status, book_id)` index to `limit_breaches` (previously status-only, so a
+  book-scoped open-breaches lookup still filtered every `OPEN` row globally). All
+  purely additive — see `alembic/versions/f9a3c7e18b52_scale_and_performance_indexes.py`.
+- **`GET /trades`'s `limit` was unbounded** — a plain `int`, not clamped, so a client
+  could pass `?limit=999999999` and force the server to materialize its entire
+  entitled trade set into memory. Capped at 1,000 (`Query(le=...)`), matching the
+  pattern `app.modules.export`'s bulk endpoints already used.
+- **N+1 fix**: `RiskService.compute_option_greeks` looped `session.refresh()` once
+  per persisted `OptionGreeksResult` after a single batched commit — N sequential
+  round trips for a book with N live option trades, for a result whose fields
+  (`id` is a client-side default; everything else is set before commit) were already
+  known and never actually needed the refresh. Removed.
+- **Confirmed fine as-is**: `ValuationService.build_positions` and all three VaR
+  methods are comfortably sub-50ms at realistic scale (`PERFORMANCE.md`) — the
+  P1-7 Decimal-arithmetic rewrite didn't introduce a meaningful regression, and the
+  quant computation itself was never the bottleneck.
+- **Identified, not fixed**: at 15,000 live trades in a single portfolio-wide query,
+  ORM object hydration (`Trade.counterparty`/`.book` are `lazy="joined"`, so every
+  row pulls in two more tables even when the caller only needs trade economics)
+  dominates wall-clock time far more than the query/index itself (see
+  `PERFORMANCE.md`'s `COUNT(*)`-vs-hydrated comparison: 6ms vs. 1.2-1.4s for the
+  identical predicate). Not fixed here — it's a real, separable optimization (a
+  leaner projection query for risk/valuation callers that don't need the full
+  `TradeRead` shape) that shouldn't be spec'd out speculatively without a concrete
+  caller reaching this scale. Tracked in `FUTURE_WORK.md`.
+
+`market_data_points`' Timescale hypertable (see "Chosen stack") has no compression
+or retention policy configured — a bare hypertable with Timescale's default 7-day
+chunking. Fine at v1's single-pilot-commodity scale; a multi-commodity, multi-year
+desk would want both (`PERFORMANCE.md`'s environment notes explain why this repo's
+own sandbox can't exercise Timescale-specific behavior directly). Tracked in
+`FUTURE_WORK.md`, deliberately not implemented blind in a migration with no way to
+validate it end-to-end here.
+
 ## CI
 
 - `backend-lint` / `backend-test`: SQLite-backed, no external services, fast.

@@ -1,6 +1,6 @@
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user, get_db, require_role
@@ -24,6 +24,13 @@ from app.modules.trade_capture.service import ReferenceDataService, TradeCapture
 router = APIRouter(prefix="/trades", tags=["trade-capture"])
 reference_data_router = APIRouter(tags=["reference-data"])
 change_requests_router = APIRouter(prefix="/trade-change-requests", tags=["trade-capture"])
+
+# GET /trades has no bulk-export role (see app.modules.export for that -- it's
+# already capped at 10_000), but was previously an *unbounded* `limit: int = 100`
+# with no enforced maximum: a client passing `?limit=999999999` could force the
+# server to materialize a caller's entire entitled trade set into memory. See task
+# P1-9, ARCHITECTURE.md's "Scale and performance".
+_MAX_TRADE_LIST_LIMIT = 1000
 
 _TRADER_OR_ADMIN = require_role(UserRole.TRADER, UserRole.ADMIN)
 _RISK_OR_ADMIN = require_role(UserRole.RISK_MANAGER, UserRole.ADMIN)
@@ -86,7 +93,7 @@ async def create_trade(
 @router.get("", response_model=list[TradeRead])
 async def list_trades(
     book_id: uuid.UUID | None = None,
-    limit: int = 100,
+    limit: int = Query(default=100, le=_MAX_TRADE_LIST_LIMIT),
     offset: int = 0,
     session: AsyncSession = Depends(get_db),
     actor: User = Depends(get_current_user),
