@@ -98,6 +98,7 @@ jobs:
       - run: pytest -q
         env:
           RUN_WORKER_E2E_TESTS: "1"
+          RUN_POSTGRES_CONCURRENCY_TESTS: "1"
 
   # FastAPI's generated OpenAPI schema doesn't need a live DB (confirmed: the app
   # serves /openapi.json fine with no Postgres/Redis reachable), so this stays cheap

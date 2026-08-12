@@ -297,6 +297,22 @@ optional note) once a risk manager has reviewed it. `POST /limits` upserts — c
 second limit of the same (book, commodity, limit_type) updates the existing row's
 threshold rather than stacking duplicates.
 
+**Concurrency**: VOLUME enforcement is check-then-act (read live trades, compute a
+prospective volume, compare to the threshold), which is a real race under two
+concurrent confirms in the same book+commodity — each can read the same pre-confirm
+state, each individually pass its check, yet their *combined* effect (once both are
+CONFIRMED) breaches the limit. `LimitService.lock_volume_limit` takes a Postgres row
+lock (`SELECT ... FOR UPDATE`) on the book's `BookLimit` row *before*
+`TradeCaptureService` re-reads live trades, so a second concurrent confirm is forced to
+wait for the first's transaction to finish and then recompute against its now-visible
+change, rather than racing it. This relies on Postgres's default READ COMMITTED
+isolation plus that lock's blocking behavior, not a higher isolation level — see
+`LimitService.lock_volume_limit`'s docstring for why that's the deliberate choice, not
+an oversight. SQLite (the default test suite's backend) can't demonstrate this race at
+all (one connection, no real concurrency), so the regression test
+(`test_limit_concurrency.py`) runs only in the `backend-integration-postgres` CI job,
+against real concurrent Postgres connections.
+
 ### Observability
 
 - **Structured logs** (`app/core/logging.py`): every log line is one JSON object

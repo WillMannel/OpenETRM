@@ -101,25 +101,59 @@ class LimitService:
         await self._session.refresh(breach)
         return breach
 
-    async def enforce_volume_limit(
+    async def lock_volume_limit(self, book_id: uuid.UUID, commodity: Commodity) -> BookLimit | None:
+        """Acquires a row lock (`SELECT ... FOR UPDATE`) on the book's VOLUME limit,
+        held until the caller's transaction commits or rolls back. This exists to
+        close a real check-then-act race: two trades confirmed concurrently in the
+        same book+commodity can each individually compute a prospective volume within
+        the limit (both reads happen against the same pre-confirm state), yet their
+        *combined* effect breaches it -- neither confirm's check ever saw the other's
+        change. Locking this row forces the second confirm to wait for the first's
+        transaction to finish before it's even allowed to read live trades, so its
+        prospective-volume calculation is guaranteed to happen *after* the first's
+        change is visible, not concurrently with it.
+
+        Callers MUST call this before re-reading live trades / computing prospective
+        volume, and must pass the returned limit to enforce_locked_volume_limit within
+        the same transaction -- calling this and then doing the volume read+check
+        outside its lock window provides no protection at all. Returns None if no
+        VOLUME limit is configured for this book+commodity: nothing to protect, so no
+        lock is taken and callers should skip enforcement entirely (a race between two
+        confirms is harmless when there's no limit to enforce -- both trades are
+        simply allowed to confirm, which is correct).
+
+        Isolation-level note: this relies on Postgres's default READ COMMITTED plus
+        row-level locking, not a higher isolation level (REPEATABLE READ/SERIALIZABLE).
+        FOR UPDATE's blocking behavior is what actually closes this race -- it forces
+        strict ordering between the two transactions -- and that holds regardless of
+        isolation level. A higher isolation level would add serialization-failure
+        handling (the app would need to catch and retry) for no additional correctness
+        benefit here, since we aren't relying on repeatable reads across multiple
+        unlocked statements anywhere in this path."""
+        return await self._limit_repo.get_by_book_and_type(
+            book_id, commodity, LimitType.VOLUME, for_update=True
+        )
+
+    async def enforce_locked_volume_limit(
         self,
-        book_id: uuid.UUID,
-        commodity: Commodity,
+        limit: BookLimit,
         prospective_max_abs_volume: float,
         as_of_date: date,
         actor: User,
     ) -> None:
-        """Raises LimitBreachError (and records the breach) if `prospective_max_abs_volume`
-        -- the largest absolute net volume across any delivery month the book would hold
-        after the trade in question is confirmed -- exceeds the book's VOLUME limit for
-        this commodity. No-op if no such limit is configured."""
-        limit = await self._limit_repo.get_by_book_and_type(book_id, commodity, LimitType.VOLUME)
-        if limit is None or prospective_max_abs_volume <= float(limit.threshold):
+        """The second half of the lock_volume_limit pattern: raises LimitBreachError
+        (and records the breach) if `prospective_max_abs_volume` -- computed from a
+        *fresh* read of live trades taken while holding `limit`'s row lock -- exceeds
+        its threshold."""
+        if prospective_max_abs_volume <= float(limit.threshold):
             return
 
+        commodity_value = (
+            limit.commodity if isinstance(limit.commodity, str) else limit.commodity.value
+        )
         await self._record_breach(limit, prospective_max_abs_volume, as_of_date, actor)
         raise LimitBreachError(
-            f"confirming this trade would bring book {book_id}'s net {commodity.value} "
+            f"confirming this trade would bring book {limit.book_id}'s net {commodity_value} "
             f"volume to {prospective_max_abs_volume:g}, exceeding the VOLUME limit of "
             f"{float(limit.threshold):g}"
         )

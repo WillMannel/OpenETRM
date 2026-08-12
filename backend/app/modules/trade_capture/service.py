@@ -35,6 +35,7 @@ from app.common.exceptions import NotFoundError, ValidationFailedError
 from app.modules.audit.service import record_audit_event
 from app.modules.auth.models import User
 from app.modules.entitlements.service import EntitlementService
+from app.modules.limits.models import BookLimit
 from app.modules.limits.service import LimitService
 from app.modules.trade_capture.models import Book, Counterparty, Trade, TradeChangeRequest
 from app.modules.trade_capture.repository import (
@@ -395,34 +396,38 @@ class TradeCaptureService:
         await self._session.refresh(change_request)
         return change_request
 
-    async def _enforce_volume_limit(
-        self,
-        book_id: uuid.UUID,
-        commodity_raw: Any,
-        candidate_trades: list[Trade],
-        actor: User,
+    async def _check_locked_volume_limit(
+        self, limit: BookLimit, candidate_trades: list[Trade], actor: User
     ) -> None:
         """Shared by confirm and amendment-approval: raises (and records a breach) if
         `candidate_trades` -- the book's live trades as they would look *after* the
         transition being validated -- would push net volume, in any delivery month,
-        past a configured VOLUME limit for this commodity."""
+        past `limit`'s threshold. `limit` must already be locked (see
+        LimitService.lock_volume_limit) and `candidate_trades` must have been read
+        *after* acquiring that lock, or this check provides no protection against a
+        concurrent confirm racing it."""
         positions = ValuationService(self._session).build_positions(candidate_trades, date.today())
         prospective_max_abs_volume = max((abs(p.net_volume) for p in positions), default=0.0)
-        commodity = Commodity(_enum_value(commodity_raw))
-        await self._limit_service.enforce_volume_limit(
-            book_id, commodity, prospective_max_abs_volume, date.today(), actor
+        await self._limit_service.enforce_locked_volume_limit(
+            limit, prospective_max_abs_volume, date.today(), actor
         )
 
     async def _enforce_volume_limit_for_confirm(self, trade: Trade, actor: User) -> None:
         """`trade` is still NEW at this point, so it isn't yet counted by
         list_live -- include it explicitly alongside the book's other live trades.
         Scoped to `trade`'s own commodity: an unrelated commodity's position in the
-        same book must never count toward this limit (see test_multi_commodity_book.py)."""
+        same book must never count toward this limit (see test_multi_commodity_book.py).
+
+        Locks the book's VOLUME limit row *before* reading live trades -- the
+        ordering, not just the lock itself, is what closes the race where two trades
+        confirmed concurrently in the same book+commodity each individually check out
+        within the limit but combined breach it (see LimitService.lock_volume_limit)."""
         commodity = Commodity(_enum_value(trade.commodity))
+        limit = await self._limit_service.lock_volume_limit(trade.book_id, commodity)
+        if limit is None:
+            return  # no VOLUME limit configured for this book+commodity -- nothing to enforce
         live_trades = await self._repo.list_live(trade.book_id, commodity=commodity)
-        await self._enforce_volume_limit(
-            trade.book_id, trade.commodity, [*live_trades, trade], actor
-        )
+        await self._check_locked_volume_limit(limit, [*live_trades, trade], actor)
 
     async def _enforce_volume_limit_for_amendment(
         self, original_trade: Trade, new_trade: Trade, actor: User
@@ -432,13 +437,15 @@ class TradeCaptureService:
         volume replaced by the amended one, not added alongside it. Commodity isn't
         amendable (see _AMENDABLE_FIELDS), so original_trade and new_trade always share
         one commodity; scoped to it so an unrelated commodity's position in the same
-        book never counts toward this limit."""
+        book never counts toward this limit. Same lock-before-read ordering as
+        _enforce_volume_limit_for_confirm, for the same reason."""
         commodity = Commodity(_enum_value(new_trade.commodity))
+        limit = await self._limit_service.lock_volume_limit(original_trade.book_id, commodity)
+        if limit is None:
+            return
         live_trades = await self._repo.list_live(original_trade.book_id, commodity=commodity)
         other_live_trades = [t for t in live_trades if t.id != original_trade.id]
-        await self._enforce_volume_limit(
-            original_trade.book_id, new_trade.commodity, [*other_live_trades, new_trade], actor
-        )
+        await self._check_locked_volume_limit(limit, [*other_live_trades, new_trade], actor)
 
     def _check_pending_and_four_eyes(self, change_request: TradeChangeRequest, actor: User) -> None:
         if change_request.status != ChangeRequestStatus.PENDING:

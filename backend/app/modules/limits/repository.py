@@ -21,13 +21,28 @@ class LimitRepository:
         return await self._session.get(BookLimit, limit_id)
 
     async def get_by_book_and_type(
-        self, book_id: uuid.UUID, commodity: Commodity, limit_type: LimitType
+        self,
+        book_id: uuid.UUID,
+        commodity: Commodity,
+        limit_type: LimitType,
+        *,
+        for_update: bool = False,
     ) -> BookLimit | None:
+        """`for_update=True` issues `SELECT ... FOR UPDATE`: a row lock held until the
+        caller's transaction commits/rolls back, used to serialize concurrent
+        check-then-act volume-limit enforcement (see
+        TradeCaptureService._enforce_volume_limit / LimitService.lock_volume_limit).
+        A no-op on SQLite (the dialect silently drops the clause -- confirmed by
+        testing directly, not assumed), which is fine: SQLite's tests never exercise
+        real concurrent transactions in the first place, only the multi-connection
+        Postgres CI job can actually demonstrate the race this exists to prevent."""
         stmt = select(BookLimit).where(
             BookLimit.book_id == book_id,
             BookLimit.commodity == commodity.value,
             BookLimit.limit_type == limit_type.value,
         )
+        if for_update:
+            stmt = stmt.with_for_update()
         result = await self._session.execute(stmt)
         return result.scalars().first()
 
