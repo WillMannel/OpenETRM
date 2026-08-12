@@ -5,6 +5,7 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.common.enums import Commodity, ConfidenceLevel, VarMethod
+from app.common.money import MoneyDecimal
 
 
 class VarRunRequest(BaseModel):
@@ -25,14 +26,16 @@ class VarResultRead(BaseModel):
     horizon_days: int
     method: str
     scenario_window_days: int
-    var_value: float
+    var_value: MoneyDecimal
     computed_at: datetime
 
 
 class SensitivityResultRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     tenor_bucket: str
-    delta_value: float
+    delta_value: MoneyDecimal
+    # float, deliberately: the price bump used to compute delta_value is a quant
+    # model input, not a persisted money amount -- see SensitivityResult.bump_size.
     bump_size: float
 
 
@@ -85,11 +88,11 @@ class PnlAttributionResponse(BaseModel):
     book_id: uuid.UUID
     prior_date: date
     current_date: date
-    price_effect: float
-    new_trade_effect: float = Field(
+    price_effect: MoneyDecimal
+    new_trade_effect: MoneyDecimal = Field(
         description="MTM of trades booked between prior_date and current_date"
     )
-    total: float
+    total: MoneyDecimal
 
 
 class OptionGreeksRequest(BaseModel):

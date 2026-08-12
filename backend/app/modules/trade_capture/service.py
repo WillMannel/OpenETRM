@@ -14,6 +14,7 @@ approver must not be the user who made the request.
 import uuid
 from collections.abc import Callable
 from datetime import date, datetime, timezone
+from decimal import Decimal
 from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -32,6 +33,7 @@ from app.common.enums import (
     VolumeUnit,
 )
 from app.common.exceptions import NotFoundError, ValidationFailedError
+from app.common.money import to_decimal
 from app.modules.audit.service import record_audit_event
 from app.modules.auth.models import User
 from app.modules.entitlements.service import EntitlementService
@@ -63,7 +65,14 @@ def _enum_value(v: Any) -> Any:
 
 
 def _trade_snapshot(trade: Trade) -> dict[str, Any]:
-    """A JSON-safe dict of a trade's economic terms + status, for audit before/after."""
+    """A JSON-safe dict of a trade's economic terms + status, for audit before/after.
+
+    Money/quantity fields are stringified (`str(Decimal)`, e.g. `"100.0000"`), not
+    cast to `float` -- this is an append-only compliance record; the whole point of
+    the trade capture flow being exact (see app.common.money) is defeated if the
+    audit trail of what actually happened isn't. `json.dumps` (the JSON column's
+    default serializer) can't encode `Decimal` directly, and stringifying is exact
+    where a `float` cast wouldn't be."""
     return {
         "id": str(trade.id),
         "trade_date": trade.trade_date.isoformat(),
@@ -72,16 +81,18 @@ def _trade_snapshot(trade: Trade) -> dict[str, Any]:
         "commodity": _enum_value(trade.commodity),
         "trade_type": _enum_value(trade.trade_type),
         "buy_sell": _enum_value(trade.buy_sell),
-        "volume": float(trade.volume),
+        "volume": str(trade.volume),
         "volume_unit": _enum_value(trade.volume_unit),
-        "fixed_price": float(trade.fixed_price) if trade.fixed_price is not None else None,
+        "fixed_price": str(trade.fixed_price) if trade.fixed_price is not None else None,
         "price_currency": _enum_value(trade.price_currency),
         "delivery_start_month": trade.delivery_start_month.isoformat(),
         "delivery_end_month": trade.delivery_end_month.isoformat(),
         "floating_index": trade.floating_index,
         "option_type": _enum_value(trade.option_type) if trade.option_type else None,
-        "strike_price": float(trade.strike_price) if trade.strike_price is not None else None,
-        "premium": float(trade.premium) if trade.premium is not None else None,
+        "strike_price": str(trade.strike_price) if trade.strike_price is not None else None,
+        "premium": str(trade.premium) if trade.premium is not None else None,
+        # float, not stringified -- option_volatility is a quant model input, not
+        # exact trade economics (see Trade.option_volatility's docstring).
         "option_volatility": (
             float(trade.option_volatility) if trade.option_volatility is not None else None
         ),
@@ -100,16 +111,16 @@ def _optional(coercer: Callable[[Any], Any]) -> Callable[[Any], Any]:
 _FIELD_COERCERS: dict[str, Callable[[Any], Any]] = {
     "trade_type": TradeType,
     "buy_sell": BuySell,
-    "volume": float,
+    "volume": to_decimal,
     "volume_unit": VolumeUnit,
-    "fixed_price": _optional(float),
+    "fixed_price": _optional(to_decimal),
     "price_currency": Currency,
     "delivery_start_month": date.fromisoformat,
     "delivery_end_month": date.fromisoformat,
     "floating_index": str,
     "option_type": _optional(OptionType),
-    "strike_price": _optional(float),
-    "premium": _optional(float),
+    "strike_price": _optional(to_decimal),
+    "premium": _optional(to_decimal),
     "option_volatility": _optional(float),
     "power_block": _optional(PowerBlock),
     "certificate_registry": _optional(str),
@@ -407,7 +418,7 @@ class TradeCaptureService:
         *after* acquiring that lock, or this check provides no protection against a
         concurrent confirm racing it."""
         positions = ValuationService(self._session).build_positions(candidate_trades, date.today())
-        prospective_max_abs_volume = max((abs(p.net_volume) for p in positions), default=0.0)
+        prospective_max_abs_volume = max((abs(p.net_volume) for p in positions), default=Decimal(0))
         await self._limit_service.enforce_locked_volume_limit(
             limit, prospective_max_abs_volume, date.today(), actor
         )
@@ -477,7 +488,7 @@ class TradeCaptureService:
         for field, raw_value in changes.items():
             current[field] = _coerce_amendment_value(field, raw_value)
 
-        if float(current["volume"]) <= 0:
+        if current["volume"] <= 0:
             raise ValidationFailedError("volume must be positive")
         if current["delivery_end_month"] < current["delivery_start_month"]:
             raise ValidationFailedError(
@@ -495,7 +506,7 @@ class TradeCaptureService:
                 raise ValidationFailedError("fixed_price does not apply to OPTION trades")
             # Mirrors TradeCreate._check_ranges -- an amendment shouldn't be able to
             # sneak a non-positive strike/vol past the same rule creation enforces.
-            if float(current["strike_price"]) <= 0:
+            if current["strike_price"] <= 0:
                 raise ValidationFailedError("strike_price must be positive")
             if float(current["option_volatility"]) <= 0:
                 raise ValidationFailedError("option_volatility must be positive")

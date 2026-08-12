@@ -6,8 +6,7 @@ See tests/golden/README.md.
 
 import uuid
 from datetime import date
-
-import pytest
+from decimal import Decimal
 
 from app.common.enums import BuySell, Commodity, Currency, TradeStatus, TradeType, VolumeUnit
 from app.modules.trade_capture.models import Trade
@@ -16,7 +15,7 @@ from app.modules.valuation.service import ValuationService
 MONTH = date(2026, 6, 1)
 
 
-def _trade(buy_sell: BuySell, volume: float, fixed_price: float, book_id: uuid.UUID) -> Trade:
+def _trade(buy_sell: BuySell, volume: Decimal, fixed_price: Decimal, book_id: uuid.UUID) -> Trade:
     return Trade(
         id=uuid.uuid4(),
         trade_date=date(2026, 1, 1),
@@ -42,17 +41,19 @@ def test_build_positions_matches_hand_computed_net_volume_and_avg_price():
     3.10."""
     book_id = uuid.uuid4()
     trades = [
-        _trade(BuySell.BUY, 100, 3.00, book_id),
-        _trade(BuySell.SELL, 40, 3.50, book_id),
-        _trade(BuySell.BUY, 20, 2.80, book_id),
+        _trade(BuySell.BUY, Decimal("100"), Decimal("3.00"), book_id),
+        _trade(BuySell.SELL, Decimal("40"), Decimal("3.50"), book_id),
+        _trade(BuySell.BUY, Decimal("20"), Decimal("2.80"), book_id),
     ]
 
     service = ValuationService.__new__(ValuationService)  # pure function, no DB needed
     positions = service.build_positions(trades, as_of_date=date(2026, 1, 15))
 
     assert len(positions) == 1
-    assert positions[0].net_volume == pytest.approx(80.0)
-    assert positions[0].avg_fixed_price == pytest.approx(3.10)
+    # Exact Decimal equality, not pytest.approx -- this arithmetic is exact now (see
+    # app.common.money), so there's no rounding slack to approximate away.
+    assert positions[0].net_volume == Decimal("80")
+    assert positions[0].avg_fixed_price == Decimal("3.10")
 
 
 def test_unrealized_pnl_matches_hand_computed_value_against_curve():
@@ -61,16 +62,16 @@ def test_unrealized_pnl_matches_hand_computed_value_against_curve():
     = 80 * (3.25 - 3.10) = 80 * 0.15 = 12.00."""
     book_id = uuid.uuid4()
     trades = [
-        _trade(BuySell.BUY, 100, 3.00, book_id),
-        _trade(BuySell.SELL, 40, 3.50, book_id),
-        _trade(BuySell.BUY, 20, 2.80, book_id),
+        _trade(BuySell.BUY, Decimal("100"), Decimal("3.00"), book_id),
+        _trade(BuySell.SELL, Decimal("40"), Decimal("3.50"), book_id),
+        _trade(BuySell.BUY, Decimal("20"), Decimal("2.80"), book_id),
     ]
 
     service = ValuationService.__new__(ValuationService)
     positions = service.build_positions(trades, as_of_date=date(2026, 1, 15))
     position = positions[0]
 
-    curve_price = 3.25
+    curve_price = Decimal("3.25")
     unrealized = position.net_volume * (curve_price - position.avg_fixed_price)
 
-    assert unrealized == pytest.approx(12.00)
+    assert unrealized == Decimal("12.00")

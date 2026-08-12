@@ -4,6 +4,7 @@ from datetime import date, datetime
 from pydantic import BaseModel, ConfigDict
 
 from app.common.enums import Commodity, Currency
+from app.common.money import MoneyDecimal
 
 
 class PositionRead(BaseModel):
@@ -11,8 +12,8 @@ class PositionRead(BaseModel):
     book_id: uuid.UUID
     commodity: Commodity
     delivery_month: date
-    net_volume: float
-    avg_fixed_price: float
+    net_volume: MoneyDecimal
+    avg_fixed_price: MoneyDecimal
     as_of_date: date
 
 
@@ -23,9 +24,9 @@ class ValuationResultRead(BaseModel):
     book_id: uuid.UUID | None
     as_of_date: date
     curve_id: uuid.UUID
-    mtm_value: float
-    realized_pnl: float
-    unrealized_pnl: float
+    mtm_value: MoneyDecimal
+    realized_pnl: MoneyDecimal
+    unrealized_pnl: MoneyDecimal
     currency: Currency
     computed_at: datetime
 
@@ -33,8 +34,8 @@ class ValuationResultRead(BaseModel):
 class BookPnlSummary(BaseModel):
     book_id: uuid.UUID
     as_of_date: date
-    total_mtm_value: float
-    total_unrealized_pnl: float
+    total_mtm_value: MoneyDecimal
+    total_unrealized_pnl: MoneyDecimal
     positions: list[PositionRead]
 
 
@@ -60,7 +61,7 @@ class ValuationRunSummary(BaseModel):
     have shown, plus the run's identity for audit/lineage."""
 
     run: ValuationRunRead
-    total_mtm_value: float
-    total_unrealized_pnl: float
+    total_mtm_value: MoneyDecimal
+    total_unrealized_pnl: MoneyDecimal
     positions: list[PositionRead]
     results: list[ValuationResultRead]

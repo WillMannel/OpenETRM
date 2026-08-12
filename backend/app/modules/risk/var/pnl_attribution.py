@@ -17,6 +17,7 @@ ARCHITECTURE.md.
 
 from dataclasses import dataclass
 from datetime import date
+from decimal import Decimal
 
 
 @dataclass(frozen=True)
@@ -25,27 +26,31 @@ class TradeMonthSnapshot:
     one of these per month, all with the same signed_volume/fixed_price/trade_date."""
 
     delivery_month: date
-    signed_volume: float
-    fixed_price: float
+    signed_volume: Decimal
+    fixed_price: Decimal
     trade_date: date
 
 
 @dataclass(frozen=True)
 class PnlAttribution:
-    price_effect: float
-    new_trade_effect: float
-    total: float
+    price_effect: Decimal
+    new_trade_effect: Decimal
+    total: Decimal
 
 
 def attribute_pnl(
     snapshots: list[TradeMonthSnapshot],
     prior_date: date,
     current_date: date,
-    prior_prices_by_month: dict[date, float],
-    current_prices_by_month: dict[date, float],
+    prior_prices_by_month: dict[date, Decimal],
+    current_prices_by_month: dict[date, Decimal],
 ) -> PnlAttribution:
-    price_effect = 0.0
-    new_trade_effect = 0.0
+    # Decimal accumulators, not float -- this sums signed_volume * price_delta
+    # trade-by-trade over a book's entire live trade population, the same
+    # unbounded-summation-over-many-trades shape as ValuationService.build_positions
+    # (see app.common.money's module docstring for why that matters).
+    price_effect = Decimal(0)
+    new_trade_effect = Decimal(0)
 
     for snap in snapshots:
         current_price = current_prices_by_month.get(snap.delivery_month)

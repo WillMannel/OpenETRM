@@ -1,5 +1,6 @@
 import uuid
 from datetime import date, datetime
+from decimal import Decimal
 
 from sqlalchemy import Date, DateTime, ForeignKey, Numeric, String, UniqueConstraint, func
 from sqlalchemy.orm import Mapped, mapped_column
@@ -21,7 +22,11 @@ class BookLimit(Base):
     book_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("books.id"), nullable=False)
     commodity: Mapped[Commodity] = mapped_column(String(30), nullable=False)
     limit_type: Mapped[LimitType] = mapped_column(String(10), nullable=False)
-    threshold: Mapped[float] = mapped_column(Numeric(20, 6), nullable=False)
+    # Decimal -- compared directly against exact Decimal volumes/VaR values at
+    # enforcement time (see LimitService); a float threshold compared against a float
+    # observed value is exactly the kind of boundary comparison that can misfire by a
+    # rounding hair right at the limit.
+    threshold: Mapped[Decimal] = mapped_column(Numeric(20, 6), nullable=False)
     # Only meaningful for VAR limits; ignored for VOLUME.
     confidence_level: Mapped[int] = mapped_column(nullable=False, default=95)
 
@@ -47,8 +52,8 @@ class LimitBreach(Base):
     book_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("books.id"), nullable=False)
     commodity: Mapped[Commodity] = mapped_column(String(30), nullable=False)
     limit_type: Mapped[LimitType] = mapped_column(String(10), nullable=False)
-    threshold: Mapped[float] = mapped_column(Numeric(20, 6), nullable=False)
-    observed_value: Mapped[float] = mapped_column(Numeric(20, 6), nullable=False)
+    threshold: Mapped[Decimal] = mapped_column(Numeric(20, 6), nullable=False)
+    observed_value: Mapped[Decimal] = mapped_column(Numeric(20, 6), nullable=False)
     as_of_date: Mapped[date] = mapped_column(Date, nullable=False)
     status: Mapped[LimitBreachStatus] = mapped_column(
         String(20), nullable=False, default=LimitBreachStatus.OPEN

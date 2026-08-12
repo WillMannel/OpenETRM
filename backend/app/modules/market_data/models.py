@@ -1,5 +1,6 @@
 import uuid
 from datetime import date, datetime
+from decimal import Decimal
 
 from sqlalchemy import Date, DateTime, ForeignKey, Numeric, String, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -25,7 +26,7 @@ class MarketDataPoint(Base):
     commodity: Mapped[Commodity] = mapped_column(String(30), nullable=False)
     quote_date: Mapped[date] = mapped_column(Date, nullable=False)
     delivery_month: Mapped[date] = mapped_column(Date, nullable=False)
-    price: Mapped[float] = mapped_column(Numeric(18, 6), nullable=False)
+    price: Mapped[Decimal] = mapped_column(Numeric(18, 6), nullable=False)
     source: Mapped[MarketDataSource] = mapped_column(
         String(10), nullable=False, default=MarketDataSource.SEED
     )
@@ -60,5 +61,5 @@ class CurvePoint(Base):
     curve_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("forward_curves.id"), nullable=False)
     curve: Mapped["ForwardCurve"] = relationship(back_populates="points")
     delivery_month: Mapped[date] = mapped_column(Date, nullable=False)
-    price: Mapped[float] = mapped_column(Numeric(18, 6), nullable=False)
+    price: Mapped[Decimal] = mapped_column(Numeric(18, 6), nullable=False)
     tenor_bucket: Mapped[str] = mapped_column(String(7), nullable=False)  # "YYYY-MM"

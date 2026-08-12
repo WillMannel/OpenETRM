@@ -5,6 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.common.enums import Commodity, CurveStatus
 from app.common.exceptions import NotFoundError
+from app.common.money import to_decimal
 from app.modules.market_data.curve_builder.bootstrapper import bootstrap_monthly_curve
 from app.modules.market_data.models import CurvePoint, ForwardCurve, MarketDataPoint
 from app.modules.market_data.repository import MarketDataRepository
@@ -32,7 +33,12 @@ class MarketDataService:
         )
         points = [
             CurvePoint(
-                delivery_month=seg.delivery_month, price=seg.price, tenor_bucket=seg.tenor_bucket
+                delivery_month=seg.delivery_month,
+                # The piecewise-flat bootstrap is quant math (float); crosses into
+                # exact arithmetic right here, at persistence -- same pattern as
+                # RiskService.run_var's var_value.
+                price=to_decimal(seg.price),
+                tenor_bucket=seg.tenor_bucket,
             )
             for seg in segments
         ]

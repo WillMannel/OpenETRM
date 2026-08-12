@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.common.dates import month_range
 from app.common.enums import LINEAR_TRADE_TYPES, BuySell, Commodity, TradeType, UserRole, VarMethod
 from app.common.exceptions import ForbiddenError, NotFoundError
+from app.common.money import to_decimal
 from app.core.config import get_settings
 from app.modules.auth.models import User
 from app.modules.entitlements.service import EntitlementService
@@ -71,7 +72,13 @@ class RiskService:
         positions = self._valuation_service.build_positions(trades, as_of_date)
         if not positions:
             return pd.Series(dtype=float)
-        return pd.Series({p.delivery_month: p.net_volume for p in positions})
+        # float here, deliberately: this Series feeds numpy/pandas VaR and
+        # bump-and-revalue quant math (historical_var, _curve_context.revalue), which
+        # have no Decimal support and no benefit from it. p.net_volume itself is
+        # still computed exactly in Decimal by build_positions -- this is the one
+        # clean conversion point going *into* quant math, the mirror image of
+        # app.common.money.to_decimal going the other way.
+        return pd.Series({p.delivery_month: float(p.net_volume) for p in positions})
 
     async def _price_panel(
         self, commodity: Commodity, as_of_date: date, window_days: int
@@ -107,8 +114,15 @@ class RiskService:
         net_volume = await self._net_volume_by_month(book_id, as_of_date, commodity)
 
         var_fn = _VAR_METHODS[method]
-        var_value = var_fn(
-            VarInput(price_history=price_panel, net_volume_by_month=net_volume), confidence_level
+        # Historical-sim/parametric/Monte Carlo VaR is quant math (numpy/pandas),
+        # float in, float out -- correct to leave as-is. var_value crosses into exact
+        # arithmetic right here, the moment it's about to be persisted/compared
+        # against a limit threshold.
+        var_value = to_decimal(
+            var_fn(
+                VarInput(price_history=price_panel, net_volume_by_month=net_volume),
+                confidence_level,
+            )
         )
 
         result = VarResult(
@@ -174,7 +188,10 @@ class RiskService:
                 as_of_date=as_of_date,
                 curve_id=curve.id,
                 tenor_bucket=bucket.tenor_bucket,
-                delta_value=bucket.delta_value,
+                # Crosses from the bump-and-revalue quant math's float output into
+                # exact arithmetic right at persistence -- see run_var's identical
+                # treatment of var_value.
+                delta_value=to_decimal(bucket.delta_value),
                 bump_size=bucket.bump_size,
             )
             for bucket in ladder
@@ -212,17 +229,26 @@ class RiskService:
         if current_curve is None:
             raise NotFoundError("ForwardCurve", f"{commodity}@{current_date}")
 
+        # Decimal, not float -- this feeds attribute_pnl's trade-by-trade P&L
+        # summation, the exact same unbounded-summation-over-many-trades shape as
+        # ValuationService.build_positions (curve/trade prices here are already
+        # Decimal at the ORM boundary; no cast needed to keep them that way).
         prior_prices = (
-            {p.delivery_month: float(p.price) for p in prior_curve.points} if prior_curve else {}
+            {p.delivery_month: p.price for p in prior_curve.points} if prior_curve else {}
         )
-        current_prices = {p.delivery_month: float(p.price) for p in current_curve.points}
+        current_prices = {p.delivery_month: p.price for p in current_curve.points}
 
         trades = await self._live_trades(book_id, commodity=commodity)
         snapshots = [
             TradeMonthSnapshot(
                 delivery_month=month,
-                signed_volume=float(t.volume) if t.buy_sell == BuySell.BUY else -float(t.volume),
-                fixed_price=float(t.fixed_price),  # type: ignore[arg-type]
+                # to_decimal is a no-op for a real (ORM-loaded) Trade's already-Decimal
+                # volume/fixed_price -- see ValuationService.build_positions's
+                # identical comment for why it's still needed here.
+                signed_volume=(
+                    to_decimal(t.volume) if t.buy_sell == BuySell.BUY else -to_decimal(t.volume)
+                ),
+                fixed_price=to_decimal(t.fixed_price),  # type: ignore[arg-type]
                 trade_date=t.trade_date,
             )
             for t in trades

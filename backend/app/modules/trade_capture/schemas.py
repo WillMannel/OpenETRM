@@ -16,6 +16,7 @@ from app.common.enums import (
     TradeType,
     VolumeUnit,
 )
+from app.common.money import MoneyDecimal
 
 _CERTIFICATE_TRADE_TYPES = (TradeType.REC, TradeType.EMISSIONS_ALLOWANCE)
 
@@ -54,11 +55,11 @@ class TradeCreate(BaseModel):
     commodity: Commodity = Commodity.HENRY_HUB
     trade_type: TradeType
     buy_sell: BuySell
-    volume: float
+    volume: MoneyDecimal
     volume_unit: VolumeUnit = VolumeUnit.MMBTU
     # Required for SWAP/FORWARD (the fixed leg's price); must be omitted for OPTION,
     # which is priced off strike_price/premium/option_volatility instead.
-    fixed_price: float | None = None
+    fixed_price: MoneyDecimal | None = None
     price_currency: Currency = Currency.USD
     delivery_start_month: date
     delivery_end_month: date
@@ -67,8 +68,10 @@ class TradeCreate(BaseModel):
     # OPTION-only. delivery_start_month doubles as the option's expiry convention (it
     # must be exercised/expire before physical/financial delivery begins).
     option_type: OptionType | None = None
-    strike_price: float | None = None
-    premium: float | None = None
+    strike_price: MoneyDecimal | None = None
+    premium: MoneyDecimal | None = None
+    # float, deliberately: a quant model input, not exact trade economics -- see
+    # Trade.option_volatility's docstring.
     option_volatility: float | None = None
 
     # POWER-only. See common.enums.PowerBlock.
@@ -155,16 +158,16 @@ class TradeRead(BaseModel):
     commodity: Commodity
     trade_type: TradeType
     buy_sell: BuySell
-    volume: float
+    volume: MoneyDecimal
     volume_unit: VolumeUnit
-    fixed_price: float | None
+    fixed_price: MoneyDecimal | None
     price_currency: Currency
     delivery_start_month: date
     delivery_end_month: date
     floating_index: str
     option_type: OptionType | None
-    strike_price: float | None
-    premium: float | None
+    strike_price: MoneyDecimal | None
+    premium: MoneyDecimal | None
     option_volatility: float | None
     power_block: PowerBlock | None
     certificate_registry: str | None

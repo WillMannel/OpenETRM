@@ -1,5 +1,6 @@
 import uuid
 from datetime import date
+from decimal import Decimal
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -47,8 +48,8 @@ async def get_book_pnl(
     return BookPnlSummary(
         book_id=book_id,
         as_of_date=as_of_date,
-        total_mtm_value=sum(r.mtm_value for r in results),
-        total_unrealized_pnl=sum(r.unrealized_pnl for r in results),
+        total_mtm_value=sum((r.mtm_value for r in results), Decimal(0)),
+        total_unrealized_pnl=sum((r.unrealized_pnl for r in results), Decimal(0)),
         positions=[PositionRead.model_validate(p) for p in positions],
     )
 
@@ -79,8 +80,8 @@ async def create_valuation_run(
 
     return ValuationRunSummary(
         run=ValuationRunRead.model_validate(run),
-        total_mtm_value=sum(r.mtm_value for r in computation.results),
-        total_unrealized_pnl=sum(r.unrealized_pnl for r in computation.results),
+        total_mtm_value=sum((r.mtm_value for r in computation.results), Decimal(0)),
+        total_unrealized_pnl=sum((r.unrealized_pnl for r in computation.results), Decimal(0)),
         positions=[PositionRead.model_validate(p) for p in computation.positions],
         results=[ValuationResultRead.model_validate(r) for r in computation.results],
     )

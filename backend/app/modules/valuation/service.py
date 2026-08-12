@@ -10,12 +10,14 @@ import uuid
 from collections import defaultdict
 from dataclasses import dataclass
 from datetime import date
+from decimal import Decimal
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.common.dates import month_range
 from app.common.enums import LINEAR_TRADE_TYPES, BuySell, Commodity, TradeType
 from app.common.exceptions import NotFoundError
+from app.common.money import to_decimal
 from app.core.config import get_settings
 from app.modules.auth.models import User
 from app.modules.entitlements.service import EntitlementService
@@ -94,19 +96,28 @@ class ValuationService:
                     f"mixed volume units {volume_units} within one position bucket "
                     f"({_commodity_key}, {month}) -- refusing to net incompatible units"
                 )
+            # Decimal arithmetic throughout -- t.volume/t.fixed_price are already
+            # Decimal (Numeric-backed columns) on any real, ORM-loaded Trade; the
+            # to_decimal() calls below are a no-op for those and only matter for a
+            # Trade built in memory with plain int/float literals (as several unit
+            # tests do). Either way, this sum/weighted-average is exactly the kind of
+            # computation, over an unbounded number of trades, where float summation
+            # silently accumulates rounding error -- casting to float here (as this
+            # used to) buys nothing and throws away the exactness the DB column
+            # already guarantees.
             signed_volumes = [
-                (float(t.volume) if t.buy_sell == BuySell.BUY else -float(t.volume))
+                (to_decimal(t.volume) if t.buy_sell == BuySell.BUY else -to_decimal(t.volume))
                 for t in month_trades
             ]
-            net_volume = sum(signed_volumes)
-            total_abs_volume = sum(abs(v) for v in signed_volumes) or 1.0
+            net_volume = sum(signed_volumes, Decimal(0))
+            total_abs_volume = sum((abs(v) for v in signed_volumes), Decimal(0)) or Decimal(1)
             # fixed_price is only ever null for OPTION trades, already filtered out of
-            # month_trades above -- the `or 0.0` is just to satisfy the type checker.
+            # month_trades above -- the `or Decimal(0)` is just to satisfy the type checker.
             weighted_prices = [
-                abs(v) * float(t.fixed_price or 0.0)
+                abs(v) * to_decimal(t.fixed_price or 0)
                 for v, t in zip(signed_volumes, month_trades, strict=True)
             ]
-            avg_price = sum(weighted_prices) / total_abs_volume
+            avg_price = sum(weighted_prices, Decimal(0)) / total_abs_volume
 
             positions.append(
                 Position(
@@ -123,7 +134,7 @@ class ValuationService:
     def price_option_trade(
         self,
         trade: Trade,
-        curve_price_by_month: dict[date, float],
+        curve_price_by_month: dict[date, Decimal],
         as_of_date: date,
         curve_id: uuid.UUID,
     ) -> ValuationResult | None:
@@ -135,22 +146,26 @@ class ValuationService:
             return None
 
         time_to_expiry_years = max((trade.delivery_start_month - as_of_date).days, 0) / 365.0
+        # Black-76 is quant math (numpy/scipy), not exact bookkeeping -- float in,
+        # float out is correct here. See app.common.money's module docstring.
         option_value = black76_price(
-            forward=forward,
+            forward=float(forward),
             strike=float(trade.strike_price),  # type: ignore[arg-type]
             volatility=float(trade.option_volatility),  # type: ignore[arg-type]
             time_to_expiry_years=time_to_expiry_years,
             risk_free_rate=get_settings().risk_free_rate,
             option_type=trade.option_type,  # type: ignore[arg-type]
         )
-        signed_volume = (
-            float(trade.volume) if trade.buy_sell == BuySell.BUY else -float(trade.volume)
-        )
-        mtm_value = signed_volume * option_value
+        trade_volume = to_decimal(trade.volume)
+        signed_volume = trade_volume if trade.buy_sell == BuySell.BUY else -trade_volume
+        # Cross back into exact arithmetic the moment Black-76's float result is
+        # available -- everything downstream (persisted mtm_value/unrealized_pnl) is
+        # Decimal from here on.
+        mtm_value = signed_volume * to_decimal(option_value)
         # The premium was already paid/received at trade_date; unrealized P&L nets it
         # out of the option's current fair value, the same way a swap's unrealized P&L
         # nets the curve price against the fixed price it was struck at.
-        unrealized = mtm_value - signed_volume * float(trade.premium)  # type: ignore[arg-type]
+        unrealized = mtm_value - signed_volume * to_decimal(trade.premium)  # type: ignore[arg-type]
         return ValuationResult(
             trade_id=trade.id,
             book_id=trade.book_id,
@@ -181,7 +196,7 @@ class ValuationService:
 
         trades = await self._trades_for_book(book_id, commodity)
         positions = self.build_positions(trades, as_of_date)
-        curve_price_by_month = {p.delivery_month: float(p.price) for p in curve.points}
+        curve_price_by_month = {p.delivery_month: p.price for p in curve.points}
 
         results: list[ValuationResult] = []
         for position in positions:

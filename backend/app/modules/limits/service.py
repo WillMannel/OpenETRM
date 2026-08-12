@@ -15,11 +15,13 @@ flush-then-commit pattern TradeCaptureService established.
 import uuid
 from datetime import date, timezone
 from datetime import datetime as dt
+from decimal import Decimal
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.common.enums import AuditAction, Commodity, LimitBreachStatus, LimitType
 from app.common.exceptions import NotFoundError, ValidationFailedError
+from app.common.money import format_decimal
 from app.modules.audit.service import record_audit_event
 from app.modules.auth.models import User
 from app.modules.entitlements.service import EntitlementService
@@ -137,15 +139,18 @@ class LimitService:
     async def enforce_locked_volume_limit(
         self,
         limit: BookLimit,
-        prospective_max_abs_volume: float,
+        prospective_max_abs_volume: Decimal,
         as_of_date: date,
         actor: User,
     ) -> None:
         """The second half of the lock_volume_limit pattern: raises LimitBreachError
         (and records the breach) if `prospective_max_abs_volume` -- computed from a
         *fresh* read of live trades taken while holding `limit`'s row lock -- exceeds
-        its threshold."""
-        if prospective_max_abs_volume <= float(limit.threshold):
+        its threshold. Both sides of this comparison are Decimal -- comparing a
+        float-cast observed value against a float-cast threshold (as this used to)
+        risks the comparison itself flipping right at the boundary due to ordinary
+        binary-float rounding, exactly where a limit check most needs to be exact."""
+        if prospective_max_abs_volume <= limit.threshold:
             return
 
         commodity_value = (
@@ -154,8 +159,8 @@ class LimitService:
         await self._record_breach(limit, prospective_max_abs_volume, as_of_date, actor)
         raise LimitBreachError(
             f"confirming this trade would bring book {limit.book_id}'s net {commodity_value} "
-            f"volume to {prospective_max_abs_volume:g}, exceeding the VOLUME limit of "
-            f"{float(limit.threshold):g}"
+            f"volume to {format_decimal(prospective_max_abs_volume)}, exceeding the VOLUME "
+            f"limit of {format_decimal(limit.threshold)}"
         )
 
     async def check_var_limit(
@@ -163,7 +168,7 @@ class LimitService:
         book_id: uuid.UUID | None,
         commodity: Commodity,
         confidence_level: int,
-        var_value: float,
+        var_value: Decimal,
         as_of_date: date,
         actor: User | None,
     ) -> LimitBreach | None:
@@ -175,13 +180,13 @@ class LimitService:
         limit = await self._limit_repo.get_by_book_and_type(book_id, commodity, LimitType.VAR)
         if limit is None or limit.confidence_level != confidence_level:
             return None
-        if var_value <= float(limit.threshold):
+        if var_value <= limit.threshold:
             return None
 
         return await self._record_breach(limit, var_value, as_of_date, actor)
 
     async def _record_breach(
-        self, limit: BookLimit, observed_value: float, as_of_date: date, actor: User | None
+        self, limit: BookLimit, observed_value: Decimal, as_of_date: date, actor: User | None
     ) -> LimitBreach:
         breach = LimitBreach(
             limit_id=limit.id,
@@ -209,8 +214,12 @@ class LimitService:
                 "book_id": str(limit.book_id),
                 "commodity": commodity_value,
                 "limit_type": limit_type_value,
-                "threshold": float(limit.threshold),
-                "observed_value": observed_value,
+                # Stringified, not float-cast -- see trade_capture.service._trade_
+                # snapshot's docstring for why an audit record needs the exact value,
+                # and json.dumps (the JSON column's default serializer) can't encode
+                # Decimal directly.
+                "threshold": str(limit.threshold),
+                "observed_value": str(observed_value),
             },
         )
         await self._session.commit()

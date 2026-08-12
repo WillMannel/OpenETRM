@@ -1103,7 +1103,7 @@ export interface components {
             commodity: components["schemas"]["Commodity"];
             limit_type: components["schemas"]["LimitType"];
             /** Threshold */
-            threshold: number;
+            threshold: number | string;
             /**
              * Confidence Level
              * @default 95
@@ -1471,7 +1471,7 @@ export interface components {
              */
             delivery_month: string;
             /** Price */
-            price: number;
+            price: number | string;
             /** @default SEED */
             source: components["schemas"]["MarketDataSource"];
         };
@@ -1773,11 +1773,11 @@ export interface components {
             trade_type: components["schemas"]["TradeType"];
             buy_sell: components["schemas"]["BuySell"];
             /** Volume */
-            volume: number;
+            volume: number | string;
             /** @default MMBTU */
             volume_unit: components["schemas"]["VolumeUnit"];
             /** Fixed Price */
-            fixed_price?: number | null;
+            fixed_price?: number | string | null;
             /** @default USD */
             price_currency: components["schemas"]["Currency"];
             /**
@@ -1797,9 +1797,9 @@ export interface components {
             floating_index: string;
             option_type?: components["schemas"]["OptionType"] | null;
             /** Strike Price */
-            strike_price?: number | null;
+            strike_price?: number | string | null;
             /** Premium */
-            premium?: number | null;
+            premium?: number | string | null;
             /** Option Volatility */
             option_volatility?: number | null;
             power_block?: components["schemas"]["PowerBlock"] | null;

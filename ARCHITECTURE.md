@@ -253,6 +253,62 @@ the time. Approval enforces **four-eyes**: the approver may not be the same user
 made the request, checked in `TradeCaptureService._check_pending_and_four_eyes`
 regardless of role (an ADMIN can't self-approve either).
 
+### Decimal money and unit-safe quantities
+
+Every persisted money or quantity column (`Trade.volume`/`fixed_price`/`strike_price`
+/`premium`, `Position.net_volume`/`avg_fixed_price`, `ValuationResult.mtm_value`
+/`realized_pnl`/`unrealized_pnl`, `VarResult.var_value`, `SensitivityResult
+.delta_value`, `BookLimit.threshold`, `LimitBreach.threshold`/`observed_value`,
+`MarketDataPoint.price`, `CurvePoint.price`) is `Numeric(p, s)` at the DB level, and
+always has been — SQLAlchemy returns a real `decimal.Decimal` for those columns on
+Postgres *and* SQLite. What wasn't true until this pass: the Python-side type
+annotations (`Mapped[float]`) and the service-layer arithmetic on those values lied
+about that, casting to `float` at dozens of call sites the moment a value came off
+the ORM. That meant every sum/weighted-average over more than a handful of trades —
+`ValuationService.build_positions`'s net-volume and volume-weighted-average-price
+rollup chief among them, since it feeds MTM, VaR, the delta ladder, stress tests, and
+pre-trade volume-limit enforcement simultaneously — accumulated ordinary IEEE-754
+binary-float rounding error. `app.common.money` is the fix:
+
+- `Mapped[Decimal]` (not `float`) on every column above, matching what SQLAlchemy
+  already returns at runtime. `option_volatility`, `SensitivityResult.bump_size`, and
+  `StressResult.pnl_impact` deliberately stay `float` — they're quant model
+  *inputs*/computed outputs with no persisted, summed-across-trades exactness
+  requirement, not exact trade economics.
+- `build_positions`, `attribute_pnl` (P&L attribution), and the VOLUME/VAR limit
+  threshold comparisons now do their summation/comparison in `Decimal` throughout,
+  not `float`. A limit threshold comparison in particular is a boundary check —
+  comparing a float-cast observed value against a float-cast threshold risks the
+  comparison itself flipping right at the edge from ordinary rounding, exactly where
+  a limit check most needs to be exact.
+- `to_decimal(value)` is the one clean conversion point for a quant module's `float`
+  output (Black-76, historical-sim/parametric/Monte Carlo VaR, bump-and-revalue
+  sensitivities, the piecewise-flat curve bootstrap) crossing back into exact
+  arithmetic at the moment it's persisted or compared against a limit — via
+  `str(float)`, not `Decimal(float)` directly, to avoid capturing the binary float's
+  true value out to 50-odd digits. Quant math itself stays `float`/numpy throughout;
+  there's no Decimal support or benefit there, and the actual defect this fixes was
+  never inside a single numerical method, only in code that summed/averaged/compared
+  many already-exact values afterward.
+- The audit log (`TradeCaptureService._trade_snapshot`, `LimitService._record_breach`)
+  stringifies (`str(Decimal)`), not float-casts, money/quantity values before writing
+  them — an append-only compliance record needs the exact value, and `json.dumps`
+  (the JSON column's default serializer) can't encode `Decimal` directly.
+- The API/Pydantic layer uses `MoneyDecimal` (`app.common.money`) instead of bare
+  `Decimal` for these fields: `Decimal` on the Python side (exact validation), but a
+  `PlainSerializer` renders it as a plain JSON number on the wire, not Pydantic v2's
+  own default (a JSON *string*). This was a deliberate scope call: the actual bug was
+  repeated arithmetic losing precision, not a single, final, correctly-rounded
+  JSON-number render of an already-exact value, so keeping the wire format as
+  `number` avoided an unrelated, sprawling frontend contract change (generated
+  TypeScript types are unaffected on the response side; request-schema types widen to
+  `number | string`, harmlessly, since `Decimal` also accepts a string on input).
+
+Unit-safety (not mixing incompatible volume units, e.g. MMBtu and Dth, into one net
+position) predates this pass — see task P0-1 and `build_positions`'s explicit
+same-bucket unit check, which raises rather than silently blending — and continues to
+hold; this pass only changed *how exactly* the numbers within one unit are summed.
+
 ### Risk methodology
 
 `POST /risk/var/run` takes a `method`: `HISTORICAL_SIM` (default, unweighted

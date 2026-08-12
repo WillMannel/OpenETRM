@@ -1,5 +1,6 @@
 import uuid
 from datetime import date, datetime
+from decimal import Decimal
 
 from sqlalchemy import JSON, Date, DateTime, ForeignKey, Integer, Numeric, String, func
 from sqlalchemy.dialects.postgresql import JSONB
@@ -60,13 +61,18 @@ class Trade(Base):
     trade_type: Mapped[TradeType] = mapped_column(String(20), nullable=False)
     buy_sell: Mapped[BuySell] = mapped_column(String(10), nullable=False)
 
-    volume: Mapped[float] = mapped_column(Numeric(18, 4), nullable=False)
+    # Decimal, not float -- this is exact trade economics, not a quant computation
+    # output. See app.common.money's module docstring for why float was wrong here
+    # even though the DB column was always Numeric (SQLAlchemy already returned
+    # Decimal at runtime; only the Python-side annotation and the service-layer
+    # arithmetic on it were lying about that).
+    volume: Mapped[Decimal] = mapped_column(Numeric(18, 4), nullable=False)
     volume_unit: Mapped[VolumeUnit] = mapped_column(
         String(10), nullable=False, default=VolumeUnit.MMBTU
     )
 
     # Null for OPTION trades (priced off strike_price/premium/option_volatility instead).
-    fixed_price: Mapped[float | None] = mapped_column(Numeric(18, 6), nullable=True)
+    fixed_price: Mapped[Decimal | None] = mapped_column(Numeric(18, 6), nullable=True)
     price_currency: Mapped[Currency] = mapped_column(
         String(5), nullable=False, default=Currency.USD
     )
@@ -81,8 +87,13 @@ class Trade(Base):
     # Populated only for trade_type=OPTION; null for SWAP/FORWARD. See
     # app.modules.valuation.options for the Black-76 pricer these feed.
     option_type: Mapped[OptionType | None] = mapped_column(String(10), nullable=True)
-    strike_price: Mapped[float | None] = mapped_column(Numeric(18, 6), nullable=True)
-    premium: Mapped[float | None] = mapped_column(Numeric(18, 6), nullable=True)
+    strike_price: Mapped[Decimal | None] = mapped_column(Numeric(18, 6), nullable=True)
+    premium: Mapped[Decimal | None] = mapped_column(Numeric(18, 6), nullable=True)
+    # float, deliberately, unlike its Decimal siblings above: a volatility input to
+    # Black-76 is a quant model parameter, not exact trade economics -- it flows
+    # straight into numpy/scipy math (app.modules.valuation.options) and is never
+    # summed/averaged the way volume/price are, so there's no precision-accumulation
+    # risk to fix here.
     option_volatility: Mapped[float | None] = mapped_column(Numeric(9, 6), nullable=True)
 
     # Populated only for commodity=POWER; null otherwise. See common.enums.PowerBlock.
