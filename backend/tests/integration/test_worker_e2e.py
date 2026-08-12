@@ -120,66 +120,87 @@ async def _provision_user(
 
 @pytest.mark.asyncio
 async def test_curve_build_and_var_run_async_on_real_worker(worker_process):
-    from app.core.db import async_session_factory
+    from app.core.db import async_session_factory, engine
     from app.main import app
     from app.modules.trade_capture.models import Book, Counterparty
 
-    async with async_session_factory() as session:
-        counterparty = Counterparty(name=f"E2E Counterparty {uuid.uuid4().hex[:8]}")
-        book = Book(name=f"E2E Book {uuid.uuid4().hex[:8]}")
-        session.add_all([counterparty, book])
-        await session.commit()
-        book_id = str(book.id)
+    try:
+        async with async_session_factory() as session:
+            counterparty = Counterparty(name=f"E2E Counterparty {uuid.uuid4().hex[:8]}")
+            book = Book(name=f"E2E Book {uuid.uuid4().hex[:8]}")
+            session.add_all([counterparty, book])
+            await session.commit()
+            book_id = str(book.id)
 
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
-        headers = await _provision_user(client)
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            headers = await _provision_user(client)
 
-        # --- curve build: enqueue, poll, verify the worker actually built it ---
-        curve_as_of = date(2026, 3, 10).isoformat()
-        for delivery_month, price in [("2026-06-01", 3.1), ("2026-07-01", 3.2)]:
-            resp = await client.post(
-                "/api/v1/market-data/quotes",
-                json={"quote_date": curve_as_of, "delivery_month": delivery_month, "price": price},
+            # --- curve build: enqueue, poll, verify the worker actually built it ---
+            curve_as_of = date(2026, 3, 10).isoformat()
+            for delivery_month, price in [("2026-06-01", 3.1), ("2026-07-01", 3.2)]:
+                resp = await client.post(
+                    "/api/v1/market-data/quotes",
+                    json={
+                        "quote_date": curve_as_of,
+                        "delivery_month": delivery_month,
+                        "price": price,
+                    },
+                    headers=headers,
+                )
+                assert resp.status_code == 201
+
+            curve_enqueue = await client.post(
+                "/api/v1/curves/build-async", json={"as_of_date": curve_as_of}, headers=headers
+            )
+            assert curve_enqueue.status_code == 202
+            curve_job_status = await _poll_until_complete(
+                client, f"/api/v1/curves/build-async/{curve_enqueue.json()['job_id']}", headers
+            )
+            curve_id = curve_job_status["result"]
+            assert curve_id is not None
+
+            curve_resp = await client.get(f"/api/v1/curves/{curve_id}", headers=headers)
+            assert curve_resp.status_code == 200
+            assert len(curve_resp.json()["points"]) == 2
+
+            # --- VaR run: enqueue, poll, verify the worker actually computed it ---
+            var_as_of = date(2026, 3, 11).isoformat()
+            for quote_date, price in [
+                ("2026-03-09", 3.0),
+                ("2026-03-10", 3.1),
+                (var_as_of, 3.05),
+            ]:
+                resp = await client.post(
+                    "/api/v1/market-data/quotes",
+                    json={
+                        "quote_date": quote_date,
+                        "delivery_month": "2026-06-01",
+                        "price": price,
+                    },
+                    headers=headers,
+                )
+                assert resp.status_code == 201
+
+            var_enqueue = await client.post(
+                "/api/v1/risk/var/run-async",
+                json={"book_id": book_id, "as_of_date": var_as_of, "scenario_window_days": 30},
                 headers=headers,
             )
-            assert resp.status_code == 201
-
-        curve_enqueue = await client.post(
-            "/api/v1/curves/build-async", json={"as_of_date": curve_as_of}, headers=headers
-        )
-        assert curve_enqueue.status_code == 202
-        curve_job_status = await _poll_until_complete(
-            client, f"/api/v1/curves/build-async/{curve_enqueue.json()['job_id']}", headers
-        )
-        curve_id = curve_job_status["result"]
-        assert curve_id is not None
-
-        curve_resp = await client.get(f"/api/v1/curves/{curve_id}", headers=headers)
-        assert curve_resp.status_code == 200
-        assert len(curve_resp.json()["points"]) == 2
-
-        # --- VaR run: enqueue, poll, verify the worker actually computed it ---
-        var_as_of = date(2026, 3, 11).isoformat()
-        for quote_date, price in [("2026-03-09", 3.0), ("2026-03-10", 3.1), (var_as_of, 3.05)]:
-            resp = await client.post(
-                "/api/v1/market-data/quotes",
-                json={"quote_date": quote_date, "delivery_month": "2026-06-01", "price": price},
-                headers=headers,
+            assert var_enqueue.status_code == 202
+            var_job_status = await _poll_until_complete(
+                client, f"/api/v1/risk/var/run-async/{var_enqueue.json()['job_id']}", headers
             )
-            assert resp.status_code == 201
+            var_result_id = var_job_status["result"]
+            assert var_result_id is not None
 
-        var_enqueue = await client.post(
-            "/api/v1/risk/var/run-async",
-            json={"book_id": book_id, "as_of_date": var_as_of, "scenario_window_days": 30},
-            headers=headers,
-        )
-        assert var_enqueue.status_code == 202
-        var_job_status = await _poll_until_complete(
-            client, f"/api/v1/risk/var/run-async/{var_enqueue.json()['job_id']}", headers
-        )
-        var_result_id = var_job_status["result"]
-        assert var_result_id is not None
-
-        var_resp = await client.get(f"/api/v1/risk/var/{var_result_id}", headers=headers)
-        assert var_resp.status_code == 200
-        assert var_resp.json()["var_value"] >= 0.0
+            var_resp = await client.get(f"/api/v1/risk/var/{var_result_id}", headers=headers)
+            assert var_resp.status_code == 200
+            assert var_resp.json()["var_value"] >= 0.0
+    finally:
+        # Dispose the shared engine's pool so no connection bound to this test's
+        # event loop leaks into another real-DB test function's (potentially
+        # different) loop -- see test_limit_concurrency.py's module docstring for
+        # the failure this prevents (RuntimeError: Future attached to a different
+        # loop), which is exactly what broke this test the first time these two
+        # files ran together in the same CI job.
+        await engine.dispose()

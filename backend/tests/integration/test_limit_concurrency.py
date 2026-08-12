@@ -22,6 +22,14 @@ cached for the process's lifetime, but asyncpg connections are bound to the even
 that opened them, and pytest-asyncio hands each test function a fresh loop by default.
 Two test functions sharing that cached, loop-bound engine across that boundary fails
 with "Future attached to a different loop" against real Postgres.
+
+That boundary problem isn't just within this file -- test_worker_e2e.py also uses the
+same cached engine, and both files run in the same pytest process in CI (both are
+gated into the backend-integration-postgres job). This test disposes the engine's
+connection pool (`engine.dispose()`) once it's done, in a `finally`, so it never leaves
+a connection bound to *this* test's event loop sitting in the pool for whichever real-DB
+test function runs next (potentially on a different loop) to accidentally reuse --
+exactly the failure this caused the first time these two files ran together in CI.
 """
 
 import asyncio
@@ -65,127 +73,136 @@ async def _provision_user(
 @pytest.mark.asyncio
 async def test_volume_limit_locking_closes_the_concurrent_confirm_race():
     from app.common.enums import Commodity
-    from app.core.db import async_session_factory
+    from app.core.db import async_session_factory, engine
     from app.main import app
     from app.modules.limits.models import BookLimit
     from app.modules.limits.service import LimitService
     from app.modules.trade_capture.models import Book, Counterparty
 
-    # --- Part 1: the locking primitive in isolation --------------------------------
-    # Session A locks the limit row and holds it; session B's lock attempt must
-    # genuinely block until A commits, not return immediately. Proven with a
-    # bounded wait -- if the lock didn't work, B would unblock well before A does.
-    async with async_session_factory() as setup_session:
-        lock_book = Book(name=f"Concurrency Lock Book {uuid.uuid4().hex[:8]}")
-        setup_session.add(lock_book)
-        await setup_session.commit()
-        limit = BookLimit(
-            book_id=lock_book.id,
-            commodity=Commodity.HENRY_HUB.value,
-            limit_type="VOLUME",
-            threshold=1000,
-        )
-        setup_session.add(limit)
-        await setup_session.commit()
-        lock_book_id = lock_book.id
-
-    session_a = async_session_factory()
-    session_b = async_session_factory()
     try:
-        locked_by_a = asyncio.Event()
-        release_a = asyncio.Event()
-        b_unblocked = asyncio.Event()
+        # --- Part 1: the locking primitive in isolation -----------------------------
+        # Session A locks the limit row and holds it; session B's lock attempt must
+        # genuinely block until A commits, not return immediately. Proven with a
+        # bounded wait -- if the lock didn't work, B would unblock well before A does.
+        async with async_session_factory() as setup_session:
+            lock_book = Book(name=f"Concurrency Lock Book {uuid.uuid4().hex[:8]}")
+            setup_session.add(lock_book)
+            await setup_session.commit()
+            limit = BookLimit(
+                book_id=lock_book.id,
+                commodity=Commodity.HENRY_HUB.value,
+                limit_type="VOLUME",
+                threshold=1000,
+            )
+            setup_session.add(limit)
+            await setup_session.commit()
+            lock_book_id = lock_book.id
 
-        async def hold_lock_in_a():
-            await LimitService(session_a).lock_volume_limit(lock_book_id, Commodity.HENRY_HUB)
-            locked_by_a.set()
-            await release_a.wait()
-            await session_a.commit()
+        session_a = async_session_factory()
+        session_b = async_session_factory()
+        try:
+            locked_by_a = asyncio.Event()
+            release_a = asyncio.Event()
+            b_unblocked = asyncio.Event()
 
-        async def attempt_lock_in_b():
+            async def hold_lock_in_a():
+                await LimitService(session_a).lock_volume_limit(lock_book_id, Commodity.HENRY_HUB)
+                locked_by_a.set()
+                await release_a.wait()
+                await session_a.commit()
+
+            async def attempt_lock_in_b():
+                await locked_by_a.wait()
+                await LimitService(session_b).lock_volume_limit(lock_book_id, Commodity.HENRY_HUB)
+                b_unblocked.set()
+
+            task_a = asyncio.create_task(hold_lock_in_a())
+            task_b = asyncio.create_task(attempt_lock_in_b())
+
             await locked_by_a.wait()
-            await LimitService(session_b).lock_volume_limit(lock_book_id, Commodity.HENRY_HUB)
-            b_unblocked.set()
+            await asyncio.sleep(0.3)
+            assert not b_unblocked.is_set(), "B's lock attempt returned before A released it"
 
-        task_a = asyncio.create_task(hold_lock_in_a())
-        task_b = asyncio.create_task(attempt_lock_in_b())
+            release_a.set()
+            await asyncio.wait_for(asyncio.gather(task_a, task_b), timeout=5.0)
+            assert b_unblocked.is_set()
+            await session_b.commit()
+        finally:
+            await session_a.close()
+            await session_b.close()
 
-        await locked_by_a.wait()
-        await asyncio.sleep(0.3)
-        assert not b_unblocked.is_set(), "B's lock attempt returned before A released it"
+        # --- Part 2: the end-to-end proof via two real concurrent confirm requests --
+        # Two trades (600 units each) in the same book+commodity, confirmed
+        # concurrently, against a VOLUME limit of 1000. Neither trade alone breaches
+        # it (600 <= 1000); confirmed together they would (1200 > 1000). Exactly one
+        # of the two concurrent confirm requests must succeed and the other must be
+        # rejected as a limit breach -- never both succeeding (the bug this fixes)
+        # and never both failing.
+        async with async_session_factory() as session:
+            counterparty = Counterparty(name=f"Concurrency Trading {uuid.uuid4().hex[:8]}")
+            confirm_book = Book(name=f"Concurrency Confirm Book {uuid.uuid4().hex[:8]}")
+            session.add_all([counterparty, confirm_book])
+            await session.commit()
+            cp_id, confirm_book_id = str(counterparty.id), str(confirm_book.id)
 
-        release_a.set()
-        await asyncio.wait_for(asyncio.gather(task_a, task_b), timeout=5.0)
-        assert b_unblocked.is_set()
-        await session_b.commit()
-    finally:
-        await session_a.close()
-        await session_b.close()
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            trader = await _provision_user(client, "TRADER")
+            risk = await _provision_user(client, "RISK_MANAGER")
 
-    # --- Part 2: the end-to-end proof via two real concurrent confirm requests -----
-    # Two trades (600 units each) in the same book+commodity, confirmed concurrently,
-    # against a VOLUME limit of 1000. Neither trade alone breaches it (600 <= 1000);
-    # confirmed together they would (1200 > 1000). Exactly one of the two concurrent
-    # confirm requests must succeed and the other must be rejected as a limit breach
-    # -- never both succeeding (the bug this fixes) and never both failing.
-    async with async_session_factory() as session:
-        counterparty = Counterparty(name=f"Concurrency Trading {uuid.uuid4().hex[:8]}")
-        confirm_book = Book(name=f"Concurrency Confirm Book {uuid.uuid4().hex[:8]}")
-        session.add_all([counterparty, confirm_book])
-        await session.commit()
-        cp_id, confirm_book_id = str(counterparty.id), str(confirm_book.id)
-
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
-        trader = await _provision_user(client, "TRADER")
-        risk = await _provision_user(client, "RISK_MANAGER")
-
-        limit_resp = await client.post(
-            "/api/v1/limits",
-            json={
-                "book_id": confirm_book_id,
-                "commodity": "HENRY_HUB",
-                "limit_type": "VOLUME",
-                "threshold": 1000,
-            },
-            headers=risk,
-        )
-        assert limit_resp.status_code == 201
-
-        trade_ids = []
-        for _ in range(2):
-            resp = await client.post(
-                "/api/v1/trades",
+            limit_resp = await client.post(
+                "/api/v1/limits",
                 json={
-                    "trade_date": "2026-01-10",
-                    "counterparty_id": cp_id,
                     "book_id": confirm_book_id,
-                    "trade_type": "SWAP",
-                    "buy_sell": "BUY",
-                    "volume": 600,
-                    "fixed_price": 3.00,
-                    "delivery_start_month": "2026-06-01",
-                    "delivery_end_month": "2026-06-01",
+                    "commodity": "HENRY_HUB",
+                    "limit_type": "VOLUME",
+                    "threshold": 1000,
                 },
-                headers=trader,
+                headers=risk,
             )
-            assert resp.status_code == 201
-            trade_ids.append(resp.json()["id"])
+            assert limit_resp.status_code == 201
 
-        results = await asyncio.gather(
-            *(
-                client.post(f"/api/v1/trades/{trade_id}/confirm", headers=risk)
-                for trade_id in trade_ids
+            trade_ids = []
+            for _ in range(2):
+                resp = await client.post(
+                    "/api/v1/trades",
+                    json={
+                        "trade_date": "2026-01-10",
+                        "counterparty_id": cp_id,
+                        "book_id": confirm_book_id,
+                        "trade_type": "SWAP",
+                        "buy_sell": "BUY",
+                        "volume": 600,
+                        "fixed_price": 3.00,
+                        "delivery_start_month": "2026-06-01",
+                        "delivery_end_month": "2026-06-01",
+                    },
+                    headers=trader,
+                )
+                assert resp.status_code == 201
+                trade_ids.append(resp.json()["id"])
+
+            results = await asyncio.gather(
+                *(
+                    client.post(f"/api/v1/trades/{trade_id}/confirm", headers=risk)
+                    for trade_id in trade_ids
+                )
             )
-        )
 
-        statuses = sorted(r.status_code for r in results)
-        assert statuses == [200, 422], (
-            f"expected exactly one confirm to succeed (200) and one to be rejected as "
-            f"a limit breach (422), got {statuses} -- {[r.text for r in results]}"
-        )
+            statuses = sorted(r.status_code for r in results)
+            assert statuses == [200, 422], (
+                f"expected exactly one confirm to succeed (200) and one to be rejected "
+                f"as a limit breach (422), got {statuses} -- {[r.text for r in results]}"
+            )
 
-        breaches_resp = await client.get(
-            "/api/v1/limits/breaches", params={"book_id": confirm_book_id}, headers=risk
-        )
-        assert breaches_resp.status_code == 200
-        assert len(breaches_resp.json()) == 1
+            breaches_resp = await client.get(
+                "/api/v1/limits/breaches", params={"book_id": confirm_book_id}, headers=risk
+            )
+            assert breaches_resp.status_code == 200
+            assert len(breaches_resp.json()) == 1
+    finally:
+        # See the module docstring: dispose the shared engine's pool so no connection
+        # bound to this test's event loop leaks into the next real-DB test function's
+        # (potentially different) loop -- this is what test_worker_e2e.py's failure
+        # (RuntimeError: Future attached to a different loop) turned out to be, the
+        # first time these two files ran together in CI.
+        await engine.dispose()
