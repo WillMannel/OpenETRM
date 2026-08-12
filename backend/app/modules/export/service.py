@@ -15,12 +15,12 @@ import uuid
 from datetime import date, datetime
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.risk.models import VarResult
 from app.modules.trade_capture.models import Trade
-from app.modules.valuation.models import Position, ValuationResult
+from app.modules.valuation.models import Position, ValuationResult, ValuationRun
 
 
 def _enum_value(v: Any) -> Any:
@@ -57,6 +57,7 @@ def _trade_row(trade: Trade) -> dict[str, Any]:
 def _position_row(position: Position) -> dict[str, Any]:
     return {
         "id": str(position.id),
+        "run_id": str(position.run_id) if position.run_id else None,
         "book_id": str(position.book_id),
         "commodity": _enum_value(position.commodity),
         "delivery_month": position.delivery_month.isoformat(),
@@ -69,8 +70,11 @@ def _position_row(position: Position) -> dict[str, Any]:
 def _valuation_result_row(result: ValuationResult) -> dict[str, Any]:
     return {
         "id": str(result.id),
+        "run_id": str(result.run_id) if result.run_id else None,
         "trade_id": str(result.trade_id) if result.trade_id else None,
         "book_id": str(result.book_id) if result.book_id else None,
+        "commodity": _enum_value(result.commodity) if result.commodity else None,
+        "delivery_month": result.delivery_month.isoformat() if result.delivery_month else None,
         "as_of_date": result.as_of_date.isoformat(),
         "curve_id": str(result.curve_id),
         "mtm_value": float(result.mtm_value),
@@ -92,6 +96,30 @@ def _var_result_row(result: VarResult) -> dict[str, Any]:
         "var_value": float(result.var_value),
         "computed_at": result.computed_at.isoformat(),
     }
+
+
+def _latest_valuation_run_ids() -> Any:
+    """Subquery of ValuationRun.id: one row per (book_id, commodity, as_of_date) --
+    the most recently computed run for that key, via ROW_NUMBER() partitioned on the
+    grain and ordered by `computed_at` descending. `computed_at` is set client-side in
+    Python (microsecond resolution on every backend), not left to the DB's `now()` --
+    see ValuationRun's docstring for why that matters for this exact ordering. Used to
+    scope both positions() and valuation_results() to the latest run only, so a book
+    that's been re-valued several times doesn't export several stale, superseded
+    copies of the same snapshot alongside the current one (see
+    tests/integration/test_valuation_run_idempotency.py for the bug this replaces).
+    Rows written before ValuationRun existed have run_id=NULL and are simply excluded
+    -- there is no "latest run" for data that predates the run concept."""
+    ranked = select(
+        ValuationRun.id,
+        func.row_number()
+        .over(
+            partition_by=(ValuationRun.book_id, ValuationRun.commodity, ValuationRun.as_of_date),
+            order_by=ValuationRun.computed_at.desc(),
+        )
+        .label("rn"),
+    ).subquery()
+    return select(ranked.c.id).where(ranked.c.rn == 1)
 
 
 class ExportService:
@@ -124,9 +152,12 @@ class ExportService:
     ) -> list[dict[str, Any]]:
         # Positions are recomputed (not updated in place) on each valuation run, so
         # as_of_date -- which snapshot -- is the natural filter, not an updated_since.
+        # Scoped to the latest run per (book, commodity, as_of_date) so a book that's
+        # been re-valued more than once doesn't export duplicate, superseded rows.
         stmt = (
             select(Position)
             .where(Position.as_of_date == as_of_date)
+            .where(Position.run_id.in_(_latest_valuation_run_ids()))
             .order_by(Position.delivery_month)
             .limit(limit)
             .offset(offset)
@@ -144,8 +175,11 @@ class ExportService:
         limit: int = 1000,
         offset: int = 0,
     ) -> list[dict[str, Any]]:
+        # Scoped to the latest run per (book, commodity, as_of_date) -- see positions()
+        # above for why.
         stmt = (
             select(ValuationResult)
+            .where(ValuationResult.run_id.in_(_latest_valuation_run_ids()))
             .order_by(ValuationResult.computed_at.desc())
             .limit(limit)
             .offset(offset)

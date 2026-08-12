@@ -8,6 +8,7 @@ swap/forward, i.e. the standard fixed-for-floating settlement payoff.
 
 import uuid
 from collections import defaultdict
+from dataclasses import dataclass
 from datetime import date
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -16,11 +17,25 @@ from app.common.dates import month_range
 from app.common.enums import LINEAR_TRADE_TYPES, BuySell, Commodity, TradeType
 from app.common.exceptions import NotFoundError
 from app.core.config import get_settings
+from app.modules.auth.models import User
 from app.modules.market_data.repository import MarketDataRepository
 from app.modules.trade_capture.models import Trade
 from app.modules.trade_capture.repository import TradeRepository
-from app.modules.valuation.models import Position, ValuationResult
+from app.modules.valuation.models import Position, ValuationResult, ValuationRun
 from app.modules.valuation.options import black76_price
+
+
+@dataclass(frozen=True)
+class MarkToMarketComputation:
+    """The pure result of a mark-to-market computation: `Position`/`ValuationResult`
+    objects built in memory, not yet added to a session or given a `run_id`. Returned
+    by `ValuationService.mark_to_market` (used by the read-only GET endpoint, which
+    must never write) and consumed by `persist_valuation_run` (used by the write
+    endpoint that deliberately creates a durable, reportable snapshot)."""
+
+    curve_id: uuid.UUID
+    positions: list[Position]
+    results: list[ValuationResult]
 
 
 def _enum_value(v: object) -> object:
@@ -137,6 +152,8 @@ class ValuationService:
         return ValuationResult(
             trade_id=trade.id,
             book_id=trade.book_id,
+            commodity=_enum_value(trade.commodity),
+            delivery_month=trade.delivery_start_month,
             as_of_date=as_of_date,
             curve_id=curve_id,
             mtm_value=mtm_value,
@@ -144,9 +161,15 @@ class ValuationService:
             unrealized_pnl=unrealized,
         )
 
-    async def mark_to_market(
+    async def compute_mark_to_market(
         self, book_id: uuid.UUID, as_of_date: date, commodity: Commodity
-    ) -> tuple[list[Position], list[ValuationResult]]:
+    ) -> MarkToMarketComputation:
+        """Pure computation: builds `Position`/`ValuationResult` objects in memory and
+        returns them -- never calls `session.add`/`commit`. This is the piece that
+        used to be entangled with persistence inside the old `mark_to_market`, which a
+        read-only GET endpoint called on every request; calling this method has no
+        side effects no matter how many times it's called (see
+        tests/integration/test_valuation_run_idempotency.py)."""
         curve = await self._market_data_repo.get_published_curve(commodity, as_of_date)
         if curve is None:
             raise NotFoundError("ForwardCurve", f"{commodity}@{as_of_date}")
@@ -166,6 +189,8 @@ class ValuationService:
                 ValuationResult(
                     trade_id=None,
                     book_id=book_id,
+                    commodity=_enum_value(position.commodity),
+                    delivery_month=position.delivery_month,
                     as_of_date=as_of_date,
                     curve_id=curve.id,
                     mtm_value=unrealized,
@@ -173,7 +198,6 @@ class ValuationService:
                     unrealized_pnl=unrealized,
                 )
             )
-            self._session.add(position)
 
         for trade in trades:
             if trade.trade_type != TradeType.OPTION:
@@ -185,7 +209,51 @@ class ValuationService:
                 continue
             results.append(option_result)
 
-        for result in results:
+        return MarkToMarketComputation(curve_id=curve.id, positions=positions, results=results)
+
+    async def mark_to_market(
+        self, book_id: uuid.UUID, as_of_date: date, commodity: Commodity
+    ) -> tuple[list[Position], list[ValuationResult]]:
+        """Back-compat pure wrapper around compute_mark_to_market -- computes but does
+        NOT persist. This is what the read-only GET /positions/{book_id}/pnl endpoint
+        calls: safe to call any number of times, never writes a row."""
+        computation = await self.compute_mark_to_market(book_id, as_of_date, commodity)
+        return computation.positions, computation.results
+
+    async def persist_valuation_run(
+        self,
+        book_id: uuid.UUID,
+        as_of_date: date,
+        commodity: Commodity,
+        actor: User | None = None,
+    ) -> tuple[ValuationRun, MarkToMarketComputation]:
+        """The deliberate write path: computes fresh (via compute_mark_to_market) and
+        persists a new ValuationRun plus its Position/ValuationResult rows in one
+        transaction. Each call creates a new run rather than updating a prior one --
+        re-running (after a late trade, a curve republish, an EOD close) is expected
+        and each run is kept for history/audit; reporting reads the latest run only
+        (see v_positions_flat/v_valuation_results_flat and ExportService). Returns the
+        persisted run alongside the computation so callers don't need a second query
+        to render the numbers just written."""
+        computation = await self.compute_mark_to_market(book_id, as_of_date, commodity)
+
+        run = ValuationRun(
+            book_id=book_id,
+            commodity=commodity,
+            as_of_date=as_of_date,
+            curve_id=computation.curve_id,
+            computed_by_user_id=actor.id if actor else None,
+        )
+        self._session.add(run)
+        await self._session.flush()  # assigns run.id without ending the transaction
+
+        for position in computation.positions:
+            position.run_id = run.id
+            self._session.add(position)
+        for result in computation.results:
+            result.run_id = run.id
             self._session.add(result)
+
         await self._session.commit()
-        return positions, results
+        await self._session.refresh(run)
+        return run, computation

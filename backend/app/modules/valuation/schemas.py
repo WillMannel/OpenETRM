@@ -36,3 +36,31 @@ class BookPnlSummary(BaseModel):
     total_mtm_value: float
     total_unrealized_pnl: float
     positions: list[PositionRead]
+
+
+class ValuationRunCreate(BaseModel):
+    as_of_date: date
+    commodity: Commodity = Commodity.HENRY_HUB
+
+
+class ValuationRunRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: uuid.UUID
+    book_id: uuid.UUID
+    commodity: Commodity
+    as_of_date: date
+    curve_id: uuid.UUID
+    computed_by_user_id: uuid.UUID | None
+    computed_at: datetime
+
+
+class ValuationRunSummary(BaseModel):
+    """The persisted counterpart of BookPnlSummary -- returned by the write endpoint
+    that creates a new ValuationRun, so the caller sees the same numbers GET /pnl would
+    have shown, plus the run's identity for audit/lineage."""
+
+    run: ValuationRunRead
+    total_mtm_value: float
+    total_unrealized_pnl: float
+    positions: list[PositionRead]
+    results: list[ValuationResultRead]

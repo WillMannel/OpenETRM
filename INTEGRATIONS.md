@@ -25,8 +25,8 @@ convention.
 | View | Grain | Notes |
 |---|---|---|
 | `v_trades_flat` | one row per trade version | counterparty/book already joined in by name |
-| `v_positions_flat` | one row per book × delivery month × as-of date | |
-| `v_valuation_results_flat` | one row per valuation run | |
+| `v_positions_flat` | one row per book × commodity × delivery month, latest valuation run only | superseded runs for the same book/commodity/as-of-date are excluded, not just the newest row kept ambiguously — see `valuation_runs` |
+| `v_valuation_results_flat` | one row per book leg or option trade, latest valuation run only | same latest-run-only scoping as `v_positions_flat` |
 | `v_var_results_flat` | one row per VaR run | |
 | `v_audit_log_flat` | one row per lifecycle event | omits the `before`/`after` JSON columns on purpose — most BI tools handle a flat schema far better than nested JSON per row |
 

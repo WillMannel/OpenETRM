@@ -92,8 +92,14 @@ FTRs, BTM PPA economics) that this deliberately doesn't attempt yet.
 3. **Market data & curve building** (`modules/market_data`) — seed monthly quotes,
    bootstrap a piecewise-flat forward curve (`curve_builder/bootstrapper.py`)
 4. **Valuation** (`modules/valuation`) — roll *confirmed* trades into net positions per
-   delivery month, mark-to-market against a published curve; price OPTION trades
-   individually via Black-76
+   commodity/delivery month, mark-to-market against a published curve; price OPTION
+   trades individually via Black-76. Computation and persistence are deliberately
+   separate: `GET /positions/{book_id}/pnl` computes fresh and returns it without
+   writing anything (safe to call any number of times), while
+   `POST /positions/{book_id}/valuation-runs` is the one write path, persisting a new
+   `ValuationRun` plus its `Position`/`ValuationResult` rows each time it's called.
+   Reporting (`v_positions_flat`/`v_valuation_results_flat`, `ExportService`) always
+   reads the latest run for a given book/commodity/as-of-date.
 5. **Risk** (`modules/risk`) — VaR via historical simulation, parametric
    (variance-covariance), or Monte Carlo; a bucketed delta-ladder; stress testing
    against named shock scenarios; trade-level P&L attribution (price movement vs.

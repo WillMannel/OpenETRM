@@ -409,10 +409,43 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Get Book Pnl */
+        /**
+         * Get Book Pnl
+         * @description Pure read: computes mark-to-market fresh from live trades/the published curve
+         *     and returns it -- never writes a row, so calling this any number of times has no
+         *     side effect (see ValuationService.mark_to_market / compute_mark_to_market). For a
+         *     durable, reportable snapshot that BI tools and exports read, see
+         *     POST /positions/{book_id}/valuation-runs.
+         */
         get: operations["get_book_pnl_api_v1_positions__book_id__pnl_get"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/positions/{book_id}/valuation-runs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Create Valuation Run
+         * @description The deliberate write path: computes mark-to-market and persists it as a new
+         *     ValuationRun with its Position/ValuationResult rows, for audit history and for
+         *     reporting views/exports to read (they always read the latest run for a given
+         *     book/commodity/as_of_date -- see v_positions_flat/v_valuation_results_flat).
+         *     Role-gated the same as other risk/middle-office write actions (VaR runs, sensitivity
+         *     runs): booking a trade doesn't require publishing an official valuation snapshot,
+         *     but publishing one is a risk/middle-office action, not a trader self-service one.
+         */
+        post: operations["create_valuation_run_api_v1_positions__book_id__valuation_runs_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1728,6 +1761,98 @@ export interface components {
             /** Context */
             ctx?: Record<string, never>;
         };
+        /** ValuationResultRead */
+        ValuationResultRead: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Trade Id */
+            trade_id: string | null;
+            /** Book Id */
+            book_id: string | null;
+            /**
+             * As Of Date
+             * Format: date
+             */
+            as_of_date: string;
+            /**
+             * Curve Id
+             * Format: uuid
+             */
+            curve_id: string;
+            /** Mtm Value */
+            mtm_value: number;
+            /** Realized Pnl */
+            realized_pnl: number;
+            /** Unrealized Pnl */
+            unrealized_pnl: number;
+            currency: components["schemas"]["Currency"];
+            /**
+             * Computed At
+             * Format: date-time
+             */
+            computed_at: string;
+        };
+        /** ValuationRunCreate */
+        ValuationRunCreate: {
+            /**
+             * As Of Date
+             * Format: date
+             */
+            as_of_date: string;
+            /** @default HENRY_HUB */
+            commodity: components["schemas"]["Commodity"];
+        };
+        /** ValuationRunRead */
+        ValuationRunRead: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Book Id
+             * Format: uuid
+             */
+            book_id: string;
+            commodity: components["schemas"]["Commodity"];
+            /**
+             * As Of Date
+             * Format: date
+             */
+            as_of_date: string;
+            /**
+             * Curve Id
+             * Format: uuid
+             */
+            curve_id: string;
+            /** Computed By User Id */
+            computed_by_user_id: string | null;
+            /**
+             * Computed At
+             * Format: date-time
+             */
+            computed_at: string;
+        };
+        /**
+         * ValuationRunSummary
+         * @description The persisted counterpart of BookPnlSummary -- returned by the write endpoint
+         *     that creates a new ValuationRun, so the caller sees the same numbers GET /pnl would
+         *     have shown, plus the run's identity for audit/lineage.
+         */
+        ValuationRunSummary: {
+            run: components["schemas"]["ValuationRunRead"];
+            /** Total Mtm Value */
+            total_mtm_value: number;
+            /** Total Unrealized Pnl */
+            total_unrealized_pnl: number;
+            /** Positions */
+            positions: components["schemas"]["PositionRead"][];
+            /** Results */
+            results: components["schemas"]["ValuationResultRead"][];
+        };
         /**
          * VarMethod
          * @enum {string}
@@ -2641,6 +2766,41 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["BookPnlSummary"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_valuation_run_api_v1_positions__book_id__valuation_runs_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                book_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ValuationRunCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ValuationRunSummary"];
                 };
             };
             /** @description Validation Error */
