@@ -20,7 +20,11 @@ dependencies = [
     "QuantLib>=1.35",
     "python-dateutil>=2.9",
     "bcrypt>=4.2",
-    "pyjwt>=2.9",
+    # [crypto] pulls in the `cryptography` package: RS256 verification (needed for
+    # OIDC/Entra ID JWKS-based token validation, see app.modules.auth.oidc) requires
+    # it -- PyJWT's HS256 path (the local access tokens) doesn't, but this way it's
+    # an explicit dependency, not something relied on being present transitively.
+    "pyjwt[crypto]>=2.9",
     "email-validator>=2.2",
     "prometheus-client>=0.21",
     "pyarrow>=17.0",

@@ -88,6 +88,13 @@ jobs:
     env:
       DATABASE_URL: postgresql+asyncpg://openetrm:openetrm@localhost:5432/openetrm
       REDIS_URL: redis://localhost:6379/0
+      # `alembic upgrade head` below imports app.core.config directly (not via
+      # pytest/conftest.py), and Settings.environment defaults to "production" --
+      # secure by default, see app.core.config._validate_secrets -- which would
+      # refuse to even construct Settings without a real JWT_SECRET_KEY. This job
+      # never issues a real JWT, so "test" (relaxed to a warning, not a real secret)
+      # is correct here, same as tests/conftest.py sets for the plain `pytest -q` runs.
+      ENVIRONMENT: test
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -114,6 +121,10 @@ jobs:
         working-directory: backend
       - run: python -c "import json; from app.main import app; json.dump(app.openapi(), open('openapi.json', 'w'))"
         working-directory: backend
+        env:
+          # Imports app.main directly, not via pytest/conftest.py -- see the
+          # backend-integration-postgres job's identical comment on ENVIRONMENT.
+          ENVIRONMENT: test
       - uses: actions/setup-node@v4
         with:
           node-version: "22"

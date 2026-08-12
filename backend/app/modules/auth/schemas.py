@@ -39,7 +39,20 @@ class LoginRequest(BaseModel):
 
 class TokenResponse(BaseModel):
     access_token: str
+    refresh_token: str
     token_type: str = "bearer"
+
+
+class RefreshRequest(BaseModel):
+    refresh_token: str
+
+
+class LogoutRequest(BaseModel):
+    # Optional: revoking the refresh token too (not just the access token being used
+    # to authenticate this call) is what actually ends the session -- an access token
+    # left un-revoked would still work until its own (short) expiry either way, but a
+    # refresh token left un-revoked could mint fresh access tokens indefinitely.
+    refresh_token: str | None = None
 
 
 class ApiKeyCreate(BaseModel):

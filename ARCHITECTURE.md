@@ -170,6 +170,69 @@ walls — it's a single shared, enterprise-wide read role that doesn't authentic
 an individual user. See `FUTURE_WORK.md` §9 for what real BI-side row-level security
 would take.
 
+### Fail-fast secret handling
+
+`Settings.environment` (`app/core/config.py`) defaults to `"production"` — secure by
+default, on the theory that the common failure mode is an operator who never set
+`ENVIRONMENT` at all, not one who set it wrong. `get_settings()` calls
+`_validate_secrets()` after constructing `Settings`: if `JWT_SECRET_KEY` is missing,
+equal to the well-known default shipped in this public repo
+(`dev-only-insecure-secret-change-me`), or shorter than 32 characters, the process
+**refuses to boot** (`RuntimeError`) whenever `ENVIRONMENT=production`. Anywhere else
+(`development`/`test`/`staging`) it only logs a warning, so local dev and CI don't need
+a real secret to run. `docker-compose.yml` sets `ENVIRONMENT=development` for local
+Docker use; `tests/conftest.py` sets `ENVIRONMENT=test` plus a fixed non-secret test
+key before any `app.*` module is imported (`get_settings()` is `@lru_cache`'d
+process-wide, so whichever env vars are set the *first* time it's called are what
+stick for the rest of the process — see that file's comment for the full mechanics).
+A real deployment sets `JWT_SECRET_KEY` via `openssl rand -hex 32`, leaves
+`ENVIRONMENT` unset (or explicitly `production`), and the app fails loudly at startup
+rather than serving forgeable sessions silently. See `tests/unit/core/test_config.py`
+for the boundary cases (`_validate_secrets` is a standalone function, tested directly
+against constructed `Settings` instances, not through the process-wide cache).
+
+### Enterprise SSO, token refresh & revocation
+
+Three additions to `app/modules/auth` on top of the password-login JWT flow above,
+all under task P0-6:
+
+- **Token revocation** — access tokens are stateless HS256 JWTs (no server-side
+  session row), which is what lets `get_current_user` validate one without a DB round
+  trip on every request. The tradeoff: there's no row to delete on logout. Every
+  issued token now carries a unique `jti` claim (`security.issue_access_token`);
+  `POST /auth/logout` adds it to a Redis denylist (`app/modules/auth/revocation.py`)
+  with a TTL equal to the token's own remaining lifetime, so the denylist entry and
+  the token expire at the same moment and never grows unbounded.
+  `get_current_user` checks the denylist on every local-JWT request. The default
+  SQLite-backed test suite stays Redis-free via a `_FakeRedis` dependency override in
+  `tests/conftest.py` (same pattern already used for the Arq pool).
+- **Refresh tokens** — `POST /auth/login` now returns an access token *and* a
+  refresh token (`RefreshToken`, DB-stored, hashed like an API key). `POST
+  /auth/refresh` exchanges a valid, unexpired, unrevoked refresh token for a new
+  access+refresh pair, revoking the presented one in the same transaction
+  (single-use/rotating, via `RefreshToken.replaced_by_id`). Reusing an
+  already-rotated token is treated as a possible compromise, not a normal expiry: it
+  revokes the *entire* chain descended from the reused token (see
+  `AuthService._revoke_chain_from`'s docstring), forcing a real re-login rather than
+  either silently accepting the replay or only blocking the one request.
+- **OIDC/Entra ID federation** (`app/modules/auth/oidc.py`) — an *additional* auth
+  path, off by default. Setting `OIDC_ISSUER` (+ `OIDC_AUDIENCE`) turns it on;
+  `get_current_user` tries an `X-API-Key`, then a local JWT, then — only if OIDC is
+  configured and the bearer token isn't one of ours — validates it as an
+  externally-issued RS256 token against the provider's published JWKS
+  (`jwt.PyJWKClient`, cached per JWKS URL; `OIDC_JWKS_URL` defaults to Entra ID's
+  discovery convention if unset). A deployment that never sets `OIDC_ISSUER` is
+  completely unaffected. First login auto-provisions a local `VIEWER` user keyed on
+  the OIDC `sub` claim (`User.oidc_subject`, unique/nullable) — the one claim every
+  OIDC provider guarantees is stable per user, unlike email. OIDC login is an
+  *authentication* mechanism only; it never hands out more than the least-privileged
+  default role — an admin promotes the account afterward via the existing
+  `POST /auth/users`-adjacent path, same as any other user.
+
+Moving `JWT_SECRET_KEY` (and OIDC client secrets, for providers that need one) to a
+managed secrets store (Key Vault/Secrets Manager) is deliberately **not** implemented
+— see `FUTURE_WORK.md`.
+
 ### Trade lifecycle
 
 ```

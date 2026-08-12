@@ -1,26 +1,34 @@
 import uuid
 
+import redis.asyncio as redis_asyncio
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_db, require_role
 from app.common.enums import UserRole
 from app.common.exceptions import NotFoundError, ValidationFailedError
+from app.core.redis_client import get_redis_client
 from app.modules.auth.deps import get_current_user
 from app.modules.auth.models import User
+from app.modules.auth.revocation import revoke_token
 from app.modules.auth.schemas import (
     AdminUserCreate,
     ApiKeyCreate,
     ApiKeyCreated,
     ApiKeyRead,
     LoginRequest,
+    LogoutRequest,
+    RefreshRequest,
     TokenResponse,
     UserRead,
     UserRegister,
 )
+from app.modules.auth.security import InvalidTokenError, decode_access_token
 from app.modules.auth.service import AuthService
 
 router = APIRouter(prefix="/auth", tags=["auth"])
+_bearer_scheme = HTTPBearer(auto_error=False)
 
 
 @router.post("/register", response_model=UserRead, status_code=201)
@@ -37,10 +45,48 @@ async def register(payload: UserRegister, session: AsyncSession = Depends(get_db
 async def login(payload: LoginRequest, session: AsyncSession = Depends(get_db)) -> TokenResponse:
     service = AuthService(session)
     try:
-        token = await service.authenticate(payload)
+        tokens = await service.authenticate(payload)
     except ValidationFailedError as exc:
         raise HTTPException(status_code=401, detail=str(exc)) from exc
-    return TokenResponse(access_token=token)
+    return TokenResponse(access_token=tokens.access_token, refresh_token=tokens.refresh_token)
+
+
+@router.post("/refresh", response_model=TokenResponse)
+async def refresh(
+    payload: RefreshRequest, session: AsyncSession = Depends(get_db)
+) -> TokenResponse:
+    """Exchanges a refresh token for a new access + refresh token pair, rotating the
+    presented one (single-use -- see AuthService.refresh)."""
+    service = AuthService(session)
+    try:
+        tokens = await service.refresh(payload.refresh_token)
+    except ValidationFailedError as exc:
+        raise HTTPException(status_code=401, detail=str(exc)) from exc
+    return TokenResponse(access_token=tokens.access_token, refresh_token=tokens.refresh_token)
+
+
+@router.post("/logout", status_code=204)
+async def logout(
+    payload: LogoutRequest,
+    credentials: HTTPAuthorizationCredentials | None = Depends(_bearer_scheme),
+    session: AsyncSession = Depends(get_db),
+    _user: User = Depends(get_current_user),  # requires a currently-valid access token
+    redis: redis_asyncio.Redis = Depends(get_redis_client),
+) -> None:
+    """Revokes the access token used to authenticate this call (added to the Redis
+    denylist -- see app.modules.auth.revocation) and, if provided, the refresh token
+    too. Both are optional to actually revoke successfully in isolation: a caller
+    might only have the access token handy (e.g. from an API-key-authenticated
+    session, where there's no refresh token to speak of)."""
+    if credentials is not None:
+        try:
+            decoded = decode_access_token(credentials.credentials)
+            await revoke_token(redis, decoded.jti, decoded.expires_at)
+        except InvalidTokenError:
+            pass  # already invalid/expired -- nothing to revoke
+    if payload.refresh_token is not None:
+        service = AuthService(session)
+        await service.revoke_refresh_token(payload.refresh_token)
 
 
 @router.get("/me", response_model=UserRead)

@@ -261,6 +261,25 @@ deliberate simplifications worth widening later:
   common admin/support case of explaining *why* an access attempt failed, and no real
   deployment has asked for it.
 
+## 10. Managed secrets store
+
+**Scope**: `JWT_SECRET_KEY` (and, for OIDC providers that need one, a client secret)
+is read from a plain environment variable today (`app/core/config.py`), fail-fast
+validated at boot (see `ARCHITECTURE.md`'s "Fail-fast secret handling"), but not
+fetched from or rotated through a dedicated secrets manager (Azure Key Vault, AWS
+Secrets Manager, HashiCorp Vault, ...). Deferred deliberately rather than half-built:
+this repo doesn't target one specific cloud/platform, and a real integration means
+pulling in that platform's SDK, wiring up its auth (managed identity / IAM role /
+Vault token), and — the part that actually matters — a rotation story (the app must
+pick up a rotated secret without a restart, or an operator needs a documented restart
+process), none of which is meaningfully testable without a live instance of that
+specific service. The natural seam for this already exists:
+`Settings.jwt_secret_key`/`oidc_*` are plain fields read once at process start by
+`get_settings()` — swapping their source from `os.environ` to a secrets-manager
+client is a config-loading change, not a change to anything that uses `get_settings()`
+today. Whoever deploys this to a specific cloud is the right place to decide which
+platform's secrets manager to integrate.
+
 ## Cross-cutting note
 
 All eight of these want the same two things the rest of the platform already has:

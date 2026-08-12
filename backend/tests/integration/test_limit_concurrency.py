@@ -74,6 +74,7 @@ async def _provision_user(
 async def test_volume_limit_locking_closes_the_concurrent_confirm_race():
     from app.common.enums import Commodity
     from app.core.db import async_session_factory, engine
+    from app.core.redis_client import reset_redis_client
     from app.main import app
     from app.modules.limits.models import BookLimit
     from app.modules.limits.service import LimitService
@@ -200,9 +201,11 @@ async def test_volume_limit_locking_closes_the_concurrent_confirm_race():
             assert breaches_resp.status_code == 200
             assert len(breaches_resp.json()) == 1
     finally:
-        # See the module docstring: dispose the shared engine's pool so no connection
-        # bound to this test's event loop leaks into the next real-DB test function's
-        # (potentially different) loop -- this is what test_worker_e2e.py's failure
-        # (RuntimeError: Future attached to a different loop) turned out to be, the
-        # first time these two files ran together in CI.
+        # See the module docstring: dispose the shared engine's pool and the cached
+        # Redis client so neither leaves a connection bound to this test's event loop
+        # for the next real-DB/real-Redis test function's (potentially different)
+        # loop -- this is what test_worker_e2e.py's failure (RuntimeError: Future
+        # attached to a different loop) turned out to be, the first time these two
+        # files ran together in CI.
         await engine.dispose()
+        await reset_redis_client()

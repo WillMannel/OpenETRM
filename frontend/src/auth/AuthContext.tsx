@@ -3,7 +3,7 @@ import type { ReactNode } from "react";
 
 import { apiClient } from "../api/client";
 import type { components } from "../api/generated/types";
-import { clearStoredToken, getStoredToken, setStoredToken } from "./tokenStorage";
+import { clearStoredToken, getStoredRefreshToken, getStoredToken, setStoredTokens } from "./tokenStorage";
 
 export type CurrentUser = components["schemas"]["UserRead"];
 export type UserRole = CurrentUser["role"];
@@ -52,7 +52,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       body: { username, password },
     });
     if (error) throw new Error("Invalid username or password");
-    setStoredToken(data.access_token);
+    setStoredTokens(data.access_token, data.refresh_token);
     await loadCurrentUser();
   }
 
@@ -68,6 +68,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }
 
   function logout() {
+    // Best-effort, fire-and-forget: revoke the access token (added to the server's
+    // JWT denylist) and refresh token server-side so neither can be replayed even
+    // though they haven't expired yet -- see ARCHITECTURE.md's "Enterprise SSO,
+    // token refresh & revocation". Local state clears immediately regardless of
+    // whether this network call succeeds; a user clicking "log out" shouldn't wait
+    // on it, and it's still safe to skip (the tokens are just gone from this
+    // browser) if it fails.
+    const refreshToken = getStoredRefreshToken();
+    apiClient
+      .POST("/api/v1/auth/logout", { body: refreshToken ? { refresh_token: refreshToken } : {} })
+      .catch(() => {
+        // Network failure -- nothing to do; local logout still proceeds below.
+      });
     clearStoredToken();
     setUser(null);
   }

@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.modules.auth.models import ApiKey, User
+from app.modules.auth.models import ApiKey, RefreshToken, User
 
 
 class UserRepository:
@@ -24,9 +24,35 @@ class UserRepository:
     async def get_by_id(self, user_id: uuid.UUID) -> User | None:
         return await self._session.get(User, user_id)
 
+    async def get_by_oidc_subject(self, oidc_subject: str) -> User | None:
+        result = await self._session.execute(select(User).where(User.oidc_subject == oidc_subject))
+        return result.scalars().first()
+
     async def list_all(self) -> list[User]:
         result = await self._session.execute(select(User).order_by(User.username))
         return list(result.scalars().all())
+
+
+class RefreshTokenRepository:
+    def __init__(self, session: AsyncSession):
+        self._session = session
+
+    async def add(self, token: RefreshToken) -> RefreshToken:
+        """Flushes, doesn't commit -- AuthService.refresh combines issuing a new
+        token with revoking the old one in a single transaction, same
+        flush-then-commit pattern TradeCaptureService established."""
+        self._session.add(token)
+        await self._session.flush()
+        return token
+
+    async def get_by_hash(self, hashed_token: str) -> RefreshToken | None:
+        result = await self._session.execute(
+            select(RefreshToken).where(RefreshToken.hashed_token == hashed_token)
+        )
+        return result.scalars().first()
+
+    async def get(self, token_id: uuid.UUID) -> RefreshToken | None:
+        return await self._session.get(RefreshToken, token_id)
 
 
 class ApiKeyRepository:

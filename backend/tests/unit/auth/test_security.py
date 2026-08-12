@@ -8,12 +8,15 @@ from app.common.enums import UserRole
 from app.core.config import get_settings
 from app.modules.auth.security import (
     API_KEY_PREFIX,
+    REFRESH_TOKEN_PREFIX,
     InvalidTokenError,
     create_access_token,
     decode_access_token,
     generate_api_key,
+    generate_refresh_token,
     hash_api_key,
     hash_password,
+    issue_access_token,
     verify_password,
 )
 
@@ -33,9 +36,33 @@ def test_create_and_decode_access_token_round_trips_user_id():
     user_id = uuid.uuid4()
     token = create_access_token(user_id, UserRole.TRADER)
 
-    decoded_user_id = decode_access_token(token)
+    decoded = decode_access_token(token)
 
-    assert decoded_user_id == user_id
+    assert decoded.user_id == user_id
+
+
+def test_issue_access_token_gives_each_call_a_distinct_jti():
+    # jti is what POST /auth/logout revokes -- if two issuances ever collided, logging
+    # out on one device would silently revoke a session on another.
+    first = issue_access_token(uuid.uuid4(), UserRole.TRADER)
+    second = issue_access_token(uuid.uuid4(), UserRole.TRADER)
+    assert first.jti != second.jti
+
+    decoded = decode_access_token(first.token)
+    assert decoded.jti == first.jti
+
+
+def test_generate_refresh_token_returns_a_prefixed_token_matching_its_own_hash():
+    full_token, hashed_token = generate_refresh_token()
+
+    assert full_token.startswith(REFRESH_TOKEN_PREFIX)
+    assert hashed_token == hash_api_key(full_token)
+
+
+def test_generate_refresh_token_is_never_the_same_twice():
+    first, _ = generate_refresh_token()
+    second, _ = generate_refresh_token()
+    assert first != second
 
 
 def test_create_access_token_accepts_plain_string_role():

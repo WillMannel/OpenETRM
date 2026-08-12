@@ -121,6 +121,7 @@ async def _provision_user(
 @pytest.mark.asyncio
 async def test_curve_build_and_var_run_async_on_real_worker(worker_process):
     from app.core.db import async_session_factory, engine
+    from app.core.redis_client import reset_redis_client
     from app.main import app
     from app.modules.trade_capture.models import Book, Counterparty
 
@@ -197,10 +198,12 @@ async def test_curve_build_and_var_run_async_on_real_worker(worker_process):
             assert var_resp.status_code == 200
             assert var_resp.json()["var_value"] >= 0.0
     finally:
-        # Dispose the shared engine's pool so no connection bound to this test's
-        # event loop leaks into another real-DB test function's (potentially
-        # different) loop -- see test_limit_concurrency.py's module docstring for
-        # the failure this prevents (RuntimeError: Future attached to a different
-        # loop), which is exactly what broke this test the first time these two
-        # files ran together in the same CI job.
+        # Dispose the shared engine's pool and the cached Redis client so neither
+        # leaves a connection bound to this test's event loop for another real-DB/
+        # real-Redis test function (potentially on a different loop) to inherit --
+        # see test_limit_concurrency.py's module docstring for the DB-engine version
+        # of this failure (RuntimeError: Future attached to a different loop), which
+        # is exactly what broke this test the first time these two files ran
+        # together in the same CI job.
         await engine.dispose()
+        await reset_redis_client()
