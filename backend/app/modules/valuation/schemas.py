@@ -28,6 +28,8 @@ class ValuationResultRead(BaseModel):
     realized_pnl: MoneyDecimal
     unrealized_pnl: MoneyDecimal
     currency: Currency
+    # Only set for a per-trade OPTION result -- see ValuationResult.risk_free_rate_used.
+    risk_free_rate_used: MoneyDecimal | None = None
     computed_at: datetime
 
 
@@ -52,6 +54,11 @@ class ValuationRunRead(BaseModel):
     as_of_date: date
     curve_id: uuid.UUID
     computed_by_user_id: uuid.UUID | None
+    # Lineage (see ARCHITECTURE.md's "Risk reproducibility and lineage"): the exact
+    # Trade.id's live at computation time, and the code version that computed this
+    # run. Null for rows written before these columns existed.
+    trade_ids_used: list[str] | None = None
+    code_version: str | None = None
     computed_at: datetime
 
 

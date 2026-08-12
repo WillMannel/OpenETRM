@@ -6,7 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_arq_pool, get_current_user, get_db, require_role
 from app.common.enums import UserRole
-from app.common.exceptions import InsufficientMarketDataError, NotFoundError
+from app.common.exceptions import InsufficientMarketDataError, NotFoundError, ValidationFailedError
 from app.common.job_schemas import JobEnqueuedRead, JobStatusRead
 from app.core.jobs import get_job_snapshot
 from app.modules.auth.models import User
@@ -30,7 +30,10 @@ async def add_quote(
     _actor: User = Depends(_TRADER_OR_ADMIN),
 ) -> MarketDataPointRead:
     service = MarketDataService(session)
-    quote = await service.add_quote(payload)
+    try:
+        quote = await service.add_quote(payload)
+    except ValidationFailedError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     return MarketDataPointRead.model_validate(quote)
 
 

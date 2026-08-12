@@ -12,11 +12,35 @@ class MarketDataRepository:
     def __init__(self, session: AsyncSession):
         self._session = session
 
+    async def get_by_natural_key(
+        self, commodity: Commodity, quote_date: date, delivery_month: date
+    ) -> MarketDataPoint | None:
+        """(commodity, quote_date, delivery_month) is the point's natural key --
+        `uq_market_data_point_commodity_quote_delivery` enforces it at the DB level
+        (see that migration's docstring for why: without it, two quotes for the same
+        day/month made "the" historical price window order-dependent, not
+        reproducible). Used by MarketDataService.add_quote to reject a duplicate with
+        a clear error before hitting the constraint as a raw IntegrityError."""
+        stmt = select(MarketDataPoint).where(
+            MarketDataPoint.commodity == commodity,
+            MarketDataPoint.quote_date == quote_date,
+            MarketDataPoint.delivery_month == delivery_month,
+        )
+        result = await self._session.execute(stmt)
+        return result.scalars().first()
+
     async def add_quote(self, quote: MarketDataPoint) -> MarketDataPoint:
         self._session.add(quote)
         await self._session.commit()
         await self._session.refresh(quote)
         return quote
+
+    async def rollback(self) -> None:
+        """Used by MarketDataService.add_quote after a raw IntegrityError (the
+        uq_market_data_point_commodity_quote_delivery race case) -- the session must
+        be rolled back before it's usable again; a failed INSERT otherwise leaves the
+        transaction unable to accept any further statement."""
+        await self._session.rollback()
 
     async def latest_quotes(self, commodity: Commodity, as_of_date: date) -> list[MarketDataPoint]:
         """One quote per delivery month: the most recent quote_date at or before as_of_date."""

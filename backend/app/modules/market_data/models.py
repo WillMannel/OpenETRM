@@ -2,7 +2,7 @@ import uuid
 from datetime import date, datetime
 from decimal import Decimal
 
-from sqlalchemy import Date, DateTime, ForeignKey, Numeric, String, func
+from sqlalchemy import Date, DateTime, ForeignKey, Numeric, String, UniqueConstraint, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.common.enums import Commodity, CurveMethod, CurveStatus, MarketDataSource
@@ -18,9 +18,26 @@ class MarketDataPoint(Base):
     The ORM mapping below only flags `id` as the primary key; that's fine for how this
     model is used today (insert + range queries, no `session.get()` by id), but keep it
     in mind if that changes.
+
+    (commodity, quote_date, delivery_month) is this row's natural key --
+    `uq_market_data_point_commodity_quote_delivery` enforces it at the DB level, a
+    backstop behind MarketDataService.add_quote's proactive check-before-insert (which
+    on its own would still have a check-then-act race between two concurrent
+    submissions of the same quote; the DB constraint is what actually closes that).
+    See ARCHITECTURE.md's "Risk reproducibility and lineage" section for why a
+    duplicate isn't safe to allow at all: which of two same-day quotes "the"
+    historical price window picks would otherwise be order-dependent.
     """
 
     __tablename__ = "market_data_points"
+    __table_args__ = (
+        UniqueConstraint(
+            "commodity",
+            "quote_date",
+            "delivery_month",
+            name="uq_market_data_point_commodity_quote_delivery",
+        ),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
     commodity: Mapped[Commodity] = mapped_column(String(30), nullable=False)

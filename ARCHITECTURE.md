@@ -331,6 +331,62 @@ construction. It does not currently capture trades cancelled/amended away betwee
 two snapshot dates — see `.../pnl_attribution.py`'s docstring for why (needs a
 historical status snapshot per date, which the data model doesn't have yet).
 
+### Risk reproducibility and lineage
+
+Every persisted risk/valuation result now records *what produced it*, not just the
+number itself — the question this answers is "can we prove, months later, exactly
+what data and code computed this figure," which matters the moment a number gets
+questioned by an auditor, a regulator, or a trader who thinks yesterday's VaR looks
+wrong.
+
+- **`trade_ids_used`** (`ValuationRun`, `VarResult`, `SensitivityResult`,
+  `StressResult`) — the exact `Trade.id`s that were *live* at computation time and fed
+  the number. `ValuationService.build_positions`/`RiskService._net_volume_by_month`
+  read *live* trades at call time, not a frozen snapshot — a trade amended or
+  cancelled afterward doesn't change the stored result, but without this field there
+  was no way to prove *which* trades produced it, only that some set of then-live
+  trades did. Set once at computation time; a later amendment/cancellation never
+  retroactively updates it (see `tests/integration/test_risk_lineage.py`'s
+  amend-after-compute test).
+- **`market_data_point_ids`** (`VarResult`) — the exact `MarketDataPoint.id`s that
+  composed the historical price panel. VaR (unlike valuation, which pins a `curve_id`)
+  consumes a raw range query over quotes with no snapshot of *which* quotes it
+  selected; a backdated quote inserted after a VaR run, into the same historical
+  window, would otherwise silently change what a later "re-run" sees, with no way to
+  detect it happened.
+- **`code_version`** (every persisted risk/valuation result) —
+  `app.common.lineage.get_code_version()`: a `GIT_SHA`/`GIT_COMMIT` env var if the
+  deploy pipeline sets one, else the installed package version. Nothing recorded which
+  code version computed a result before this.
+- **`risk_free_rate_used`** (`ValuationResult`, for OPTION rows; `OptionGreeksResult`)
+  — option pricing consumes a single global config default (`Settings.risk_free_rate`)
+  that was previously never recorded anywhere; if it's ever changed, every result
+  computed under the old rate stays provably attributable to it instead of silently
+  becoming unreproducible.
+- **`StressResult`/`OptionGreeksResult` are now real persisted tables** — both were
+  previously ephemeral computations returned directly in the HTTP response with *zero*
+  database trace. A stress test or a greeks run could happen and be shown to a risk
+  manager with no way to later prove it ever ran. `GET /risk/stress/{id}` and `GET
+  /risk/options/greeks/{id}` retrieve them independently, the same pattern
+  `GET /risk/var/{id}` already established.
+- **`uq_market_data_point_commodity_quote_delivery`** — a uniqueness constraint on
+  `MarketDataPoint(commodity, quote_date, delivery_month)`. Every market-data write
+  path was already insert-only (no `UPDATE` anywhere touches these rows), but without
+  this constraint two quotes for the same day/month were both allowed to exist, and
+  which one "the" historical price window/latest-quote lookup picked was
+  order-dependent — not reproducible, even though nothing was ever edited.
+  `MarketDataService.add_quote` checks proactively (a clean 409, not a raw
+  `IntegrityError`) and the DB constraint is the backstop against the
+  check-then-act race between two concurrent submissions of the same quote.
+
+What this deliberately does **not** attempt (see `FUTURE_WORK.md`): an "as-of"
+query service that reconstructs a book's exact state at an arbitrary past timestamp
+from the audit log (the raw before/after data is there and exact —
+`app.modules.audit` — but there's no query that walks every trade's version chain and
+picks the state as of `T`); and a market-data correction/revision flow (today a wrong
+quote can only be prevented from being *duplicated*, not corrected — there's no
+"supersede this point" workflow).
+
 ### Options/optionality
 
 `Trade.trade_type` can be `SWAP`, `FORWARD`, or `OPTION`. An OPTION trade carries

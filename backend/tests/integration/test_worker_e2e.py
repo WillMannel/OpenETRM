@@ -166,9 +166,13 @@ async def test_curve_build_and_var_run_async_on_real_worker(worker_process):
 
             # --- VaR run: enqueue, poll, verify the worker actually computed it ---
             var_as_of = date(2026, 3, 11).isoformat()
+            # 2026-03-10 x 2026-06-01 was already submitted above (the curve-build
+            # phase) -- uq_market_data_point_commodity_quote_delivery (see task P1-8)
+            # would reject a second submission of the same (commodity, quote_date,
+            # delivery_month), so it's just omitted here; price_history's range query
+            # still picks it up regardless of which phase inserted it.
             for quote_date, price in [
                 ("2026-03-09", 3.0),
-                ("2026-03-10", 3.1),
                 (var_as_of, 3.05),
             ]:
                 resp = await client.post(

@@ -21,12 +21,19 @@ class VarResultRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: uuid.UUID
     book_id: uuid.UUID | None
+    commodity: Commodity | None
     as_of_date: date
     confidence_level: int
     horizon_days: int
     method: str
     scenario_window_days: int
     var_value: MoneyDecimal
+    # Lineage (see ARCHITECTURE.md's "Risk reproducibility and lineage"): the exact
+    # Trade/MarketDataPoint ids live/used at computation time, and the code version
+    # that computed this result. Null for rows written before these columns existed.
+    trade_ids_used: list[str] | None = None
+    market_data_point_ids: list[str] | None = None
+    code_version: str | None = None
     computed_at: datetime
 
 
@@ -37,6 +44,8 @@ class SensitivityResultRead(BaseModel):
     # float, deliberately: the price bump used to compute delta_value is a quant
     # model input, not a persisted money amount -- see SensitivityResult.bump_size.
     bump_size: float
+    trade_ids_used: list[str] | None = None
+    code_version: str | None = None
 
 
 class DeltaLadderRead(BaseModel):
@@ -67,8 +76,12 @@ class StressTestRequest(BaseModel):
 
 
 class StressResultRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: uuid.UUID
     scenario_name: str
-    pnl_impact: float
+    pnl_impact: MoneyDecimal
+    trade_ids_used: list[str] | None = None
+    code_version: str | None = None
 
 
 class StressTestResponse(BaseModel):
@@ -102,11 +115,15 @@ class OptionGreeksRequest(BaseModel):
 
 
 class OptionGreeksRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: uuid.UUID
     trade_id: uuid.UUID
     delta: float
     gamma: float
     vega: float
     theta: float
+    risk_free_rate_used: MoneyDecimal | None = None
+    code_version: str | None = None
 
 
 class OptionGreeksResponse(BaseModel):

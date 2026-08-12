@@ -3,6 +3,7 @@ from datetime import date, datetime, timezone
 from decimal import Decimal
 
 from sqlalchemy import (
+    JSON,
     Date,
     DateTime,
     ForeignKey,
@@ -13,10 +14,13 @@ from sqlalchemy import (
     func,
     text,
 )
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.common.enums import Commodity, Currency
 from app.db.base import Base
+
+_JSON = JSON().with_variant(JSONB, "postgresql")
 
 
 class ValuationRun(Base):
@@ -57,6 +61,16 @@ class ValuationRun(Base):
         default=lambda: datetime.now(timezone.utc),
         server_default=func.now(),
     )
+    # Lineage (see ARCHITECTURE.md's "Risk reproducibility and lineage"):
+    # trade_ids_used is the exact set of Trade.id's live at computation time that fed
+    # every Position/ValuationResult under this run -- curve_id already pins which
+    # published curve was used, but nothing previously recorded which trade *rows*
+    # were netted, so an amendment/cancellation after the fact left no way to prove
+    # what actually contributed. code_version is app.common.lineage.get_code_version()
+    # at computation time. Both nullable: rows written before these columns existed
+    # have neither, and there's no way to reconstruct either retroactively.
+    trade_ids_used: Mapped[list[str] | None] = mapped_column(_JSON, nullable=True)
+    code_version: Mapped[str | None] = mapped_column(String(100), nullable=True)
 
 
 class Position(Base):
@@ -126,6 +140,13 @@ class ValuationResult(Base):
     realized_pnl: Mapped[Decimal] = mapped_column(Numeric(20, 6), nullable=False, default=0)
     unrealized_pnl: Mapped[Decimal] = mapped_column(Numeric(20, 6), nullable=False)
     currency: Mapped[Currency] = mapped_column(String(5), nullable=False, default=Currency.USD)
+    # Only ever set for a per-trade OPTION row (trade_id IS NOT NULL) -- the
+    # risk-free rate is a single global config default (Settings.risk_free_rate) fed
+    # into Black-76 at computation time and otherwise never recorded anywhere; if it's
+    # ever changed, every option valuation computed under the old rate stays provably
+    # attributable to it instead of silently becoming unreproducible. Null for
+    # aggregate linear-position rows, which don't use it.
+    risk_free_rate_used: Mapped[Decimal | None] = mapped_column(Numeric(10, 6), nullable=True)
     computed_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )

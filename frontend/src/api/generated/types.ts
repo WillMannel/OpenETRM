@@ -711,6 +711,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/risk/stress/{stress_result_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Stress Result */
+        get: operations["get_stress_result_api_v1_risk_stress__stress_result_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/risk/pnl-attribution": {
         parameters: {
             query?: never;
@@ -739,6 +756,23 @@ export interface paths {
         put?: never;
         /** Run Option Greeks */
         post: operations["run_option_greeks_api_v1_risk_options_greeks_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/risk/options/greeks/{result_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Option Greeks Result */
+        get: operations["get_option_greeks_result_api_v1_risk_options_greeks__result_id__get"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -1505,6 +1539,11 @@ export interface components {
         /** OptionGreeksRead */
         OptionGreeksRead: {
             /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
              * Trade Id
              * Format: uuid
              */
@@ -1517,6 +1556,10 @@ export interface components {
             vega: number;
             /** Theta */
             theta: number;
+            /** Risk Free Rate Used */
+            risk_free_rate_used?: number | null;
+            /** Code Version */
+            code_version?: string | null;
         };
         /** OptionGreeksRequest */
         OptionGreeksRequest: {
@@ -1650,13 +1693,26 @@ export interface components {
             delta_value: number;
             /** Bump Size */
             bump_size: number;
+            /** Trade Ids Used */
+            trade_ids_used?: string[] | null;
+            /** Code Version */
+            code_version?: string | null;
         };
         /** StressResultRead */
         StressResultRead: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
             /** Scenario Name */
             scenario_name: string;
             /** Pnl Impact */
             pnl_impact: number;
+            /** Trade Ids Used */
+            trade_ids_used?: string[] | null;
+            /** Code Version */
+            code_version?: string | null;
         };
         /** StressScenarioIn */
         StressScenarioIn: {
@@ -1975,6 +2031,8 @@ export interface components {
             /** Unrealized Pnl */
             unrealized_pnl: number;
             currency: components["schemas"]["Currency"];
+            /** Risk Free Rate Used */
+            risk_free_rate_used?: number | null;
             /**
              * Computed At
              * Format: date-time
@@ -2016,6 +2074,10 @@ export interface components {
             curve_id: string;
             /** Computed By User Id */
             computed_by_user_id: string | null;
+            /** Trade Ids Used */
+            trade_ids_used?: string[] | null;
+            /** Code Version */
+            code_version?: string | null;
             /**
              * Computed At
              * Format: date-time
@@ -2053,6 +2115,7 @@ export interface components {
             id: string;
             /** Book Id */
             book_id: string | null;
+            commodity: components["schemas"]["Commodity"] | null;
             /**
              * As Of Date
              * Format: date
@@ -2068,6 +2131,12 @@ export interface components {
             scenario_window_days: number;
             /** Var Value */
             var_value: number;
+            /** Trade Ids Used */
+            trade_ids_used?: string[] | null;
+            /** Market Data Point Ids */
+            market_data_point_ids?: string[] | null;
+            /** Code Version */
+            code_version?: string | null;
             /**
              * Computed At
              * Format: date-time
@@ -3504,6 +3573,37 @@ export interface operations {
             };
         };
     };
+    get_stress_result_api_v1_risk_stress__stress_result_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                stress_result_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StressResultRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     run_pnl_attribution_api_v1_risk_pnl_attribution_post: {
         parameters: {
             query?: never;
@@ -3557,6 +3657,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["OptionGreeksResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_option_greeks_result_api_v1_risk_options_greeks__result_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                result_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OptionGreeksRead"];
                 };
             };
             /** @description Validation Error */

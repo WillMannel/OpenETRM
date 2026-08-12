@@ -280,6 +280,36 @@ client is a config-loading change, not a change to anything that uses `get_setti
 today. Whoever deploys this to a specific cloud is the right place to decide which
 platform's secrets manager to integrate.
 
+## 11. As-of state reconstruction and market-data correction
+
+**Scope**: two gaps deliberately left open by task P1-8 ("Risk reproducibility and
+lineage" — see `ARCHITECTURE.md`), both real but each a genuinely separate feature
+from what that task closed:
+
+- **As-of query service**: `app.modules.audit` already records an exact, append-only
+  before/after snapshot of every trade lifecycle transition (`_trade_snapshot`,
+  stringified Decimals, not lossy floats), and `Trade.version`/`previous_version_id`
+  chains an amendment to the row it superseded. What doesn't exist is a service that
+  *uses* that data to answer "what was book X's exact trade population as of
+  timestamp T" — walking every trade's version chain, picking the audit entry with
+  the latest `occurred_at &lt;= T`, and reconstructing the implied trade set. `trade_ids
+  _used` (P1-8) proves what a *specific already-computed result* used; this would be
+  the complementary capability of reconstructing that same state independently, on
+  demand, for a T that was never explicitly run. Deferred because it's a real query
+  service in its own right (cross-entity traversal, version-chain walking, a new
+  `AuditRepository` method beyond today's single-entity `list_for_entity`), not an
+  extension of anything P1-8 built.
+- **Market-data correction/revision flow**: `uq_market_data_point_commodity_quote_
+  delivery` (P1-8) prevents a *duplicate* quote for the same (commodity, quote_date,
+  delivery_month), but there's no way to *correct* a quote that was entered wrong --
+  today that's a permanent, uncorrectable error (immutability was the deliberate
+  choice for reproducibility; see `MarketDataService.add_quote`'s docstring). A real
+  correction flow needs its own design: does a correction supersede the original
+  (keeping both, like `Trade.previous_version_id`) or truly replace it (breaking any
+  already-computed result that used the wrong value)? That's a genuine trade-off
+  between reproducibility and correctness, not a small addition -- deferred rather
+  than picked hastily.
+
 ## Cross-cutting note
 
 All eight of these want the same two things the rest of the platform already has:

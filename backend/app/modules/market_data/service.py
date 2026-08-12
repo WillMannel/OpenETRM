@@ -1,10 +1,11 @@
 import uuid
 from datetime import date
 
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.common.enums import Commodity, CurveStatus
-from app.common.exceptions import NotFoundError
+from app.common.exceptions import NotFoundError, ValidationFailedError
 from app.common.money import to_decimal
 from app.modules.market_data.curve_builder.bootstrapper import bootstrap_monthly_curve
 from app.modules.market_data.models import CurvePoint, ForwardCurve, MarketDataPoint
@@ -17,7 +18,36 @@ class MarketDataService:
         self._repo = MarketDataRepository(session)
 
     async def add_quote(self, payload: MarketDataPointCreate) -> MarketDataPoint:
-        return await self._repo.add_quote(MarketDataPoint(**payload.model_dump()))
+        """(commodity, quote_date, delivery_month) is a quote's natural key -- see
+        `uq_market_data_point_commodity_quote_delivery` and ARCHITECTURE.md's "Risk
+        reproducibility and lineage" section for why a duplicate isn't safe to allow:
+        which of two same-day quotes "the" historical price window picks would
+        otherwise be order-dependent, not reproducible. Checked proactively (not just
+        left to the DB constraint) so a duplicate submission gets a clear 409, not a
+        raw IntegrityError surfacing as a 500."""
+        existing = await self._repo.get_by_natural_key(
+            payload.commodity, payload.quote_date, payload.delivery_month
+        )
+        if existing is not None:
+            raise ValidationFailedError(
+                f"a quote for {payload.commodity.value} already exists at "
+                f"quote_date={payload.quote_date} delivery_month={payload.delivery_month} "
+                "-- market data points are immutable; there is no correction/revision "
+                "flow yet (see FUTURE_WORK.md)"
+            )
+        try:
+            return await self._repo.add_quote(MarketDataPoint(**payload.model_dump()))
+        except IntegrityError as exc:
+            # The proactive check above has a check-then-act race: two concurrent
+            # submissions of the same quote can both pass it before either commits.
+            # uq_market_data_point_commodity_quote_delivery is what actually closes
+            # that race -- this translates the loser's raw IntegrityError into the
+            # same clean error the proactive check raises, rather than a 500.
+            await self._repo.rollback()
+            raise ValidationFailedError(
+                f"a quote for {payload.commodity.value} already exists at "
+                f"quote_date={payload.quote_date} delivery_month={payload.delivery_month}"
+            ) from exc
 
     async def build_curve(self, commodity: Commodity, as_of_date: date) -> ForwardCurve:
         """Bootstrap and persist a forward curve from the latest quotes as of `as_of_date`.

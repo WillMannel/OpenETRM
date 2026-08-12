@@ -17,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.common.dates import month_range
 from app.common.enums import LINEAR_TRADE_TYPES, BuySell, Commodity, TradeType
 from app.common.exceptions import NotFoundError
+from app.common.lineage import get_code_version
 from app.common.money import to_decimal
 from app.core.config import get_settings
 from app.modules.auth.models import User
@@ -39,6 +40,10 @@ class MarkToMarketComputation:
     curve_id: uuid.UUID
     positions: list[Position]
     results: list[ValuationResult]
+    # Lineage: the exact Trade.id's (as strings) live at computation time -- see
+    # ARCHITECTURE.md's "Risk reproducibility and lineage". Populated by
+    # compute_mark_to_market, persisted onto ValuationRun by persist_valuation_run.
+    trade_ids_used: list[str]
 
 
 def _enum_value(v: object) -> object:
@@ -146,6 +151,7 @@ class ValuationService:
             return None
 
         time_to_expiry_years = max((trade.delivery_start_month - as_of_date).days, 0) / 365.0
+        risk_free_rate = get_settings().risk_free_rate
         # Black-76 is quant math (numpy/scipy), not exact bookkeeping -- float in,
         # float out is correct here. See app.common.money's module docstring.
         option_value = black76_price(
@@ -153,7 +159,7 @@ class ValuationService:
             strike=float(trade.strike_price),  # type: ignore[arg-type]
             volatility=float(trade.option_volatility),  # type: ignore[arg-type]
             time_to_expiry_years=time_to_expiry_years,
-            risk_free_rate=get_settings().risk_free_rate,
+            risk_free_rate=risk_free_rate,
             option_type=trade.option_type,  # type: ignore[arg-type]
         )
         trade_volume = to_decimal(trade.volume)
@@ -176,6 +182,11 @@ class ValuationService:
             mtm_value=mtm_value,
             realized_pnl=0,
             unrealized_pnl=unrealized,
+            # Lineage (see ARCHITECTURE.md): the single global risk_free_rate
+            # config default that priced this option, otherwise never recorded
+            # anywhere -- if it's ever changed, this result stays provably
+            # attributable to the rate actually in effect when it was computed.
+            risk_free_rate_used=to_decimal(risk_free_rate),
         )
 
     async def compute_mark_to_market(
@@ -229,7 +240,12 @@ class ValuationService:
                 continue
             results.append(option_result)
 
-        return MarkToMarketComputation(curve_id=curve.id, positions=positions, results=results)
+        return MarkToMarketComputation(
+            curve_id=curve.id,
+            positions=positions,
+            results=results,
+            trade_ids_used=[str(t.id) for t in trades],
+        )
 
     async def mark_to_market(
         self, book_id: uuid.UUID, as_of_date: date, commodity: Commodity, actor: User
@@ -263,6 +279,8 @@ class ValuationService:
             as_of_date=as_of_date,
             curve_id=computation.curve_id,
             computed_by_user_id=actor.id,
+            trade_ids_used=computation.trade_ids_used,
+            code_version=get_code_version(),
         )
         self._session.add(run)
         await self._session.flush()  # assigns run.id without ending the transaction

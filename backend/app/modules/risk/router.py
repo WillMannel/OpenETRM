@@ -11,7 +11,7 @@ from app.common.exceptions import ForbiddenError, NotFoundError
 from app.common.job_schemas import JobEnqueuedRead, JobStatusRead
 from app.core.jobs import get_job_snapshot
 from app.modules.auth.models import User
-from app.modules.risk.models import VarResult
+from app.modules.risk.models import OptionGreeksResult, StressResult, VarResult
 from app.modules.risk.schemas import (
     DeltaLadderRead,
     DeltaLadderRunRequest,
@@ -182,11 +182,20 @@ async def run_stress_test(
     return StressTestResponse(
         book_id=payload.book_id,
         as_of_date=payload.as_of_date,
-        results=[
-            StressResultRead(scenario_name=r.scenario_name, pnl_impact=r.pnl_impact)
-            for r in results
-        ],
+        results=[StressResultRead.model_validate(r) for r in results],
     )
+
+
+@router.get("/stress/{stress_result_id}", response_model=StressResultRead)
+async def get_stress_result(
+    stress_result_id: uuid.UUID,
+    session: AsyncSession = Depends(get_db),
+    _user: User = Depends(get_current_user),
+) -> StressResultRead:
+    result = await session.get(StressResult, stress_result_id)
+    if result is None:
+        raise HTTPException(status_code=404, detail=f"StressResult not found: {stress_result_id}")
+    return StressResultRead.model_validate(result)
 
 
 @router.post("/pnl-attribution", response_model=PnlAttributionResponse)
@@ -227,7 +236,7 @@ async def run_option_greeks(
 ) -> OptionGreeksResponse:
     service = RiskService(session)
     try:
-        greeks_by_trade = await service.compute_option_greeks(
+        results = await service.compute_option_greeks(
             payload.book_id, payload.as_of_date, payload.commodity, actor=actor
         )
     except NotFoundError as exc:
@@ -238,14 +247,17 @@ async def run_option_greeks(
     return OptionGreeksResponse(
         book_id=payload.book_id,
         as_of_date=payload.as_of_date,
-        results=[
-            OptionGreeksRead(
-                trade_id=trade.id,
-                delta=greeks.delta,
-                gamma=greeks.gamma,
-                vega=greeks.vega,
-                theta=greeks.theta,
-            )
-            for trade, greeks in greeks_by_trade
-        ],
+        results=[OptionGreeksRead.model_validate(r) for r in results],
     )
+
+
+@router.get("/options/greeks/{result_id}", response_model=OptionGreeksRead)
+async def get_option_greeks_result(
+    result_id: uuid.UUID,
+    session: AsyncSession = Depends(get_db),
+    _user: User = Depends(get_current_user),
+) -> OptionGreeksRead:
+    result = await session.get(OptionGreeksResult, result_id)
+    if result is None:
+        raise HTTPException(status_code=404, detail=f"OptionGreeksResult not found: {result_id}")
+    return OptionGreeksRead.model_validate(result)
