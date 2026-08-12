@@ -357,6 +357,66 @@ identified a few real, larger pieces deliberately left for later:
   realistic panel), but the natural next candidates once book/scenario sizes grow
   enough that blocking the event loop for their duration becomes noticeable.
 
+## 13. Deferred production-operability, DR, and security work
+
+**Scope**: task P1-10 added CORS policy + baseline security-response headers,
+Redis-backed login rate limiting, `ruff`'s bandit (`S`) lint rules, CI dependency
+scanning (`pip-audit`, `npm audit`), a container-hardening pass (non-root users,
+multi-stage builds, healthchecks, a real production frontend image instead of a
+dev server), and a disaster-recovery runbook with an actually-executed backup/
+restore drill (`DISASTER_RECOVERY.md`). Real, larger pieces deliberately left for
+later:
+
+- **This was a hardening pass, not a third-party security review.** "Security
+  review" in this task's name is worth being precise about: what happened here is
+  an internal pass against a known checklist (CORS, headers, brute-force
+  protection, dependency CVEs, container privilege). It is not a penetration test,
+  not a threat-modeling exercise, and not an external audit — none of which a
+  single engineering pass can substitute for. Before handling real trading data,
+  this platform should get an actual third-party security review.
+- **DR runbook's RTO is unset, deliberately** — see `DISASTER_RECOVERY.md`'s "What
+  the drill does and doesn't prove": the drill script proves the backup/restore
+  *mechanism* round-trips data correctly (including `Decimal` precision) but was
+  only run against 3 seed rows on one local machine, which says nothing honest
+  about restore time at the 15,000+ trade volumes `PERFORMANCE.md` benchmarks
+  against. Re-run the drill's timing against a `benchmark_scale.py`-seeded database
+  before publishing a real RTO figure.
+- **Cross-server restore, WAL archiving/PITR infrastructure**: also flagged in
+  `DISASTER_RECOVERY.md` — this repo has no managed Postgres provider or
+  object-storage target yet (Docker Compose is the only deployment target today,
+  per `ARCHITECTURE.md`'s "Chosen stack"), so there's nothing to wire continuous
+  WAL archiving against. The runbook and a proven dump/restore mechanism exist;
+  standing up continuous archiving is "point it at a real target," not "design it
+  from scratch."
+- **Frontend production image bakes `VITE_API_BASE_URL` in at build time**
+  (`frontend/Dockerfile`'s header comment) — correct for Vite (`import.meta.env.*`
+  is inlined at compile time, there's no reading it from the container's runtime
+  environment), but means one image build per target environment. A
+  runtime-config-injection entrypoint (writing a small `config.js` from container
+  env vars at container start, read by the app before anything else) would let one
+  built image serve every environment; not built here since v1 has exactly one
+  deployment target and the extra layer of indirection isn't earning its
+  complexity yet.
+- **Container image vulnerability scanning** (Trivy/Grype against the built
+  images, not just `pip-audit`/`npm audit` against source dependencies) — would
+  catch OS-package CVEs in the `python:3.11-slim`/`nginxinc/nginx-unprivileged`
+  base images themselves, which dependency-level scanning can't see. Natural next
+  step for the `docker-build` CI job once there's an image registry to scan against.
+- **`vite`/`vitest`/`esbuild` dev-tooling advisories**: `npm audit` (unscoped)
+  currently reports moderate/high/critical findings entirely inside the
+  dev-only Vite/Vitest/esbuild build-tooling chain — never bundled into the
+  production output, so CI's `dependency-audit` job scopes its blocking check to
+  `--omit=dev`. The underlying advisories are still real (a locally-run `vite dev`
+  server accepting cross-origin requests, mainly) and worth closing via a Vite
+  6/7-major upgrade; deferred here because that's a breaking-change upgrade
+  touching the whole toolchain (`vitest` config included) and shouldn't be rushed
+  in the same pass as unrelated hardening work.
+- **mTLS / network-layer segmentation between services** (api ↔ worker ↔ Postgres
+  ↔ Redis) — today's trust boundary is "the network the containers/hosts share,"
+  same as most single-tenant deployments at this stage. Worth revisiting alongside
+  item 10's managed-secrets-store work once there's a real multi-host deployment
+  target to design it against.
+
 ## Cross-cutting note
 
 All eight of these want the same two things the rest of the platform already has:

@@ -29,6 +29,10 @@ products (**RECs**, **emissions allowances**):
 - Integrations: a read-only reporting-views role for direct BI/pipeline connections
   (Microsoft Fabric, Power BI, Databricks, Snowflake) and REST bulk-export endpoints
   (CSV/JSON/Parquet) with API-key auth for service accounts — see `INTEGRATIONS.md`
+- Production hardening: CORS + security-response headers, Redis-backed login
+  rate limiting, non-root/multi-stage container images, CI dependency-vulnerability
+  scanning, and a backup/restore runbook with an actually-executed DR drill — see
+  `DISASTER_RECOVERY.md`
 
 See `ARCHITECTURE.md` for the details and `FUTURE_WORK.md` for what's deliberately out
 of scope (regulatory reporting, credit/margining, settlement/invoicing, logistics,

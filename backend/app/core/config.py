@@ -11,7 +11,7 @@ logger = logging.getLogger(__name__)
 # The exact insecure default shipped in this file, historically. Checked by name (not
 # just "is it the current default") so this catches it even if the default value ever
 # changes in a later release and someone's env/.env still carries the old one forward.
-INSECURE_DEFAULT_JWT_SECRET = "dev-only-insecure-secret-change-me"
+INSECURE_DEFAULT_JWT_SECRET = "dev-only-insecure-secret-change-me"  # noqa: S105 -- a known-bad sentinel value to reject, not a real credential
 MIN_JWT_SECRET_LENGTH = 32
 
 
@@ -65,6 +65,22 @@ class Settings(BaseSettings):
     # provider must set this explicitly (see get_oidc_jwks_url).
     oidc_jwks_url: str | None = None
 
+    # Comma-separated list of origins the browser is allowed to call this API from
+    # (see ARCHITECTURE.md's "Production operability, DR, and security review").
+    # Defaults to the frontend's own local dev origin (docker-compose.yml's `web`
+    # service) -- deliberately *not* "*", which combined with credentialed requests
+    # (this API's Authorization: Bearer header) is the textbook CORS
+    # misconfiguration. A real deployment overrides this with its actual frontend
+    # origin(s).
+    cors_allowed_origins: str = "http://localhost:5173"
+
+    # POST /auth/login brute-force protection (see app.modules.auth.rate_limit):
+    # more than this many failed attempts for the same (client IP, username) pair
+    # within the window gets a 429, independent of whether the credentials are
+    # even valid -- closes the classic "no rate limit on login" gap.
+    login_rate_limit_max_attempts: int = 5
+    login_rate_limit_window_seconds: int = 300
+
     @property
     def oidc_enabled(self) -> bool:
         return self.oidc_issuer is not None
@@ -75,6 +91,10 @@ class Settings(BaseSettings):
         if self.oidc_issuer is None:
             return None
         return f"{self.oidc_issuer.rstrip('/')}/discovery/v2.0/keys"
+
+    @property
+    def cors_allowed_origins_list(self) -> list[str]:
+        return [origin.strip() for origin in self.cors_allowed_origins.split(",") if origin.strip()]
 
 
 def _validate_secrets(settings: Settings) -> None:

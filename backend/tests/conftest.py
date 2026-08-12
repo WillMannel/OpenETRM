@@ -44,12 +44,15 @@ AuthHeadersFactory = Callable[..., Awaitable[dict[str, str]]]
 
 class _FakeRedis:
     """In-process stand-in for the bits of redis.asyncio.Redis that
-    app.modules.auth.revocation actually uses (set with a TTL, exists). Overriding
-    get_redis_client with this -- the same pattern test_async_jobs.py already uses
-    for get_arq_pool -- is what keeps the default SQLite-backed test suite genuinely
-    Redis-free: without it, get_current_user's revocation check would need a real
-    Redis reachable for nearly every authenticated request in the suite, and worse,
-    a real redis.asyncio.Redis client cached at module scope (see
+    app.modules.auth.revocation and app.modules.auth.rate_limit actually use (set
+    with a TTL, exists, get, incr, expire, ttl, delete -- no real expiry semantics,
+    TTLs are stored but never actually count down, which is fine since no test
+    needs a rate-limit window to actually elapse). Overriding get_redis_client with
+    this -- the same pattern test_async_jobs.py already uses for get_arq_pool -- is
+    what keeps the default SQLite-backed test suite genuinely Redis-free: without
+    it, get_current_user's revocation check and POST /auth/login's rate limiter
+    would need a real Redis reachable for nearly every request in the suite, and
+    worse, a real redis.asyncio.Redis client cached at module scope (see
     app.core.redis_client's lazy-singleton pattern) would leak connections bound to
     one test function's event loop into the next, exactly the "Future attached to a
     different loop" failure class test_worker_e2e.py's and test_limit_concurrency
@@ -63,6 +66,23 @@ class _FakeRedis:
 
     async def exists(self, key: str) -> int:
         return 1 if key in self._store else 0
+
+    async def get(self, key: str) -> str | None:
+        return self._store.get(key)
+
+    async def incr(self, key: str) -> int:
+        current = int(self._store.get(key, "0")) + 1
+        self._store[key] = str(current)
+        return current
+
+    async def expire(self, key: str, seconds: int) -> None:
+        pass  # no real expiry -- see class docstring
+
+    async def ttl(self, key: str) -> int:
+        return -1 if key in self._store else -2
+
+    async def delete(self, key: str) -> None:
+        self._store.pop(key, None)
 
 
 @pytest_asyncio.fixture

@@ -1,7 +1,7 @@
 import uuid
 
 import redis.asyncio as redis_asyncio
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -11,6 +11,12 @@ from app.common.exceptions import NotFoundError, ValidationFailedError
 from app.core.redis_client import get_redis_client
 from app.modules.auth.deps import get_current_user
 from app.modules.auth.models import User
+from app.modules.auth.rate_limit import (
+    LoginRateLimitExceeded,
+    clear_login_attempts,
+    enforce_login_rate_limit,
+    record_login_failure,
+)
 from app.modules.auth.revocation import revoke_token
 from app.modules.auth.schemas import (
     AdminUserCreate,
@@ -42,12 +48,37 @@ async def register(payload: UserRegister, session: AsyncSession = Depends(get_db
 
 
 @router.post("/login", response_model=TokenResponse)
-async def login(payload: LoginRequest, session: AsyncSession = Depends(get_db)) -> TokenResponse:
+async def login(
+    payload: LoginRequest,
+    request: Request,
+    session: AsyncSession = Depends(get_db),
+    redis: redis_asyncio.Redis = Depends(get_redis_client),
+) -> TokenResponse:
+    """Rate-limited: more than Settings.login_rate_limit_max_attempts failed
+    attempts for the same (client IP, username) pair within the window gets a 429
+    -- see app.modules.auth.rate_limit. `request.client.host` is the direct TCP
+    peer, not an `X-Forwarded-For` header -- a deployment behind a reverse proxy
+    needs to terminate/normalize that itself (e.g. Starlette's
+    `ProxyHeadersMiddleware`) for this to reflect real client IPs; blindly trusting
+    a client-supplied header here would let an attacker bypass the limiter by
+    sending a different one on every request."""
+    client_ip = request.client.host if request.client is not None else "unknown"
+    try:
+        await enforce_login_rate_limit(redis, client_ip, payload.username)
+    except LoginRateLimitExceeded as exc:
+        raise HTTPException(
+            status_code=429,
+            detail=str(exc),
+            headers={"Retry-After": str(exc.retry_after_seconds)},
+        ) from exc
+
     service = AuthService(session)
     try:
         tokens = await service.authenticate(payload)
     except ValidationFailedError as exc:
+        await record_login_failure(redis, client_ip, payload.username)
         raise HTTPException(status_code=401, detail=str(exc)) from exc
+    await clear_login_attempts(redis, client_ip, payload.username)
     return TokenResponse(access_token=tokens.access_token, refresh_token=tokens.refresh_token)
 
 

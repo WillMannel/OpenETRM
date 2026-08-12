@@ -1,0 +1,16 @@
+# Local development / docker-compose only -- runs the Vite dev server with hot
+# reload and reads VITE_API_BASE_URL at *container start* (docker-compose.yml's
+# `web` service sets it there). This is NOT the deployable image: it ships the
+# whole node_modules tree, dev dependencies, and an unauthenticated dev server as
+# root. See ./Dockerfile for the production build (multi-stage, static assets
+# served by nginx as a non-root user, VITE_API_BASE_URL baked in at build time).
+FROM node:22-alpine
+
+WORKDIR /app
+COPY package.json ./
+RUN npm install
+
+COPY . .
+
+EXPOSE 5173
+CMD ["npm", "run", "dev", "--", "--host"]

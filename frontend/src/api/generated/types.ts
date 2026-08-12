@@ -30,7 +30,17 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Login */
+        /**
+         * Login
+         * @description Rate-limited: more than Settings.login_rate_limit_max_attempts failed
+         *     attempts for the same (client IP, username) pair within the window gets a 429
+         *     -- see app.modules.auth.rate_limit. `request.client.host` is the direct TCP
+         *     peer, not an `X-Forwarded-For` header -- a deployment behind a reverse proxy
+         *     needs to terminate/normalize that itself (e.g. Starlette's
+         *     `ProxyHeadersMiddleware`) for this to reflect real client IPs; blindly trusting
+         *     a client-supplied header here would let an attacker bypass the limiter by
+         *     sending a different one on every request.
+         */
         post: operations["login_api_v1_auth_login_post"];
         delete?: never;
         options?: never;

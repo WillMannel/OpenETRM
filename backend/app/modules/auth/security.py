@@ -21,7 +21,7 @@ _JWT_ROLE_CLAIM = "role"
 _JWT_ID_CLAIM = "jti"
 
 API_KEY_PREFIX = "oetrm_"
-REFRESH_TOKEN_PREFIX = "oetrm_rt_"
+REFRESH_TOKEN_PREFIX = "oetrm_rt_"  # noqa: S105 -- a token-format prefix, not a credential value
 
 
 def hash_password(plain_password: str) -> str:

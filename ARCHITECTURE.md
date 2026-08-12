@@ -613,6 +613,77 @@ own sandbox can't exercise Timescale-specific behavior directly). Tracked in
 `FUTURE_WORK.md`, deliberately not implemented blind in a migration with no way to
 validate it end-to-end here.
 
+### Production operability, DR, and security review
+
+Task P1-10, the last item on the enterprise-hardening backlog. Four pieces:
+
+**CORS + baseline security headers.** `CORSMiddleware` now enforces an explicit
+`Settings.cors_allowed_origins` allow-list (never `*` with credentials — `*` and
+`allow_credentials=True` together is a real hole, browsers reject the combination
+for a reason). A new `SecurityHeadersMiddleware`
+(`app/core/middleware.py`) adds `X-Content-Type-Options: nosniff`,
+`X-Frame-Options: DENY`, `Referrer-Policy: strict-origin-when-cross-origin` to
+every response, and `Strict-Transport-Security` conditionally when the request
+actually arrived over HTTPS (asserting it unconditionally would be a lie in local
+dev/docker-compose, which is plain HTTP).
+
+**Login brute-force protection.** `app/modules/auth/rate_limit.py`: a Redis fixed-
+window counter keyed on `(client_ip, username)`, throttling `POST /auth/login`
+after `Settings.login_rate_limit_max_attempts` (default 5) failures within
+`login_rate_limit_window_seconds` (default 300s), returning 429 + `Retry-After`.
+Keyed on the *pair*, not either alone — a distributed attacker guessing many
+usernames from one IP or the same username from many IPs gets throttled on
+whichever dimension is actually being hammered, without one popular shared
+username (a service account) locking out unrelated traffic, or one busy legitimate
+IP (many users behind the same NAT/VPN) locking out everyone behind it. Counts
+*failures* only and clears on success (`clear_login_attempts`) — a burst of a
+legitimate user's successful logins across several tabs is never throttled, and
+mistyping a password twice doesn't stay held against you once you get it right.
+`request.client.host` is the direct TCP peer, not `X-Forwarded-For` — see the
+router's docstring for what a reverse-proxy deployment needs to add
+(`ProxyHeadersMiddleware` or equivalent) for this to reflect real client IPs
+instead of the proxy's.
+
+**Dependency and static-analysis scanning.** `ruff`'s `S` (flake8-bandit) rule
+category is now enabled (`backend/pyproject.toml`) — it found three real
+false-positive "hardcoded password" flags (a named sentinel constant, an OAuth2
+`token_type` literal, a token-format prefix — all suppressed with a `noqa` stating
+why) and zero real findings otherwise. CI gained a `dependency-audit` job:
+`pip-audit --local` against the backend's installed dependency tree (catching a
+real stale-`setuptools` CVE locally, fixed by upgrading `pip`/`setuptools` first
+in the job rather than trusting whatever the runner image happens to bundle), and
+`npm audit --omit=dev --audit-level=high` against the frontend's *production*
+dependencies specifically (the `vite`/`vitest`/`esbuild` dev-tooling chain carries
+its own advisories that don't affect what actually ships — see `FUTURE_WORK.md`
+for why that's tracked separately rather than blocking on it). Also bumped
+`react-router-dom` 6→7 to close a real open-redirect/XSS advisory in the shipped
+bundle — the app's usage (`BrowserRouter`, `Routes`/`Route`, `Navigate`, `Outlet`,
+`NavLink`, `useLocation`, `useNavigate`) is exactly the declarative-mode API that's
+unchanged between v6 and v7, confirmed by the full frontend suite (tsc/eslint/
+vitest/build) staying green after the bump.
+
+**Container hardening and disaster recovery.** Both Dockerfiles are now
+multi-stage, run as a non-root user, and carry a `HEALTHCHECK`
+(`backend/Dockerfile`, `frontend/Dockerfile`). `frontend/Dockerfile` in particular
+was a real gap: it ran the Vite *dev server* as the "production" image. It's now a
+proper build (`vite build`) served by `nginxinc/nginx-unprivileged` as static
+assets, with the old dev-server image preserved as `Dockerfile.dev` for
+docker-compose's local-dev stack specifically (hot reload, runtime
+`VITE_API_BASE_URL` — see that file's header comment for why the two can't be the
+same image). `DISASTER_RECOVERY.md` is a new backup/restore runbook with RTO/RPO
+targets and, critically, an actually-executed drill
+(`backend/scripts/dr_backup_restore_drill.py`): seed real data (including an exact
+`Decimal` trade price, to prove numeric precision survives) → `pg_dump` → drop the
+database entirely → `pg_restore` → assert the restored data matches byte-for-byte.
+It also documents *why* Redis needs no backup at all — everything in it is either
+short-TTL or ephemeral operational state, never a system of record.
+
+None of this is a substitute for an actual third-party security review before this
+platform handles real trading data — see `FUTURE_WORK.md`'s item 13 for exactly
+what's still open (production-scale RTO, cross-server restore, WAL-archiving/PITR
+infrastructure, container image CVE scanning, the dev-tooling Vite major-version
+bump) and why each was deferred rather than rushed.
+
 ## CI
 
 - `backend-lint` / `backend-test`: SQLite-backed, no external services, fast.
@@ -630,7 +701,14 @@ validate it end-to-end here.
   numeric-result assertions derived independently of the implementation, not just
   status-code/shape checks. See `backend/tests/golden/README.md` and
   `backend/scripts/check_quant_golden_coverage.py`.
-- `frontend-lint-and-test`, `docker-build`: as named.
+- `frontend-lint-and-test`: as named.
+- `docker-build`: builds `backend/Dockerfile` and both frontend images
+  (`frontend/Dockerfile`, the production nginx build, and `Dockerfile.dev`, the
+  docker-compose dev-server image) — a broken Dockerfile fails here, not on first
+  real deploy.
+- `dependency-audit`: `pip-audit` (backend) + `npm audit --omit=dev` (frontend
+  production dependencies) — see "Production operability, DR, and security
+  review" above.
 
 ## Repository layout
 

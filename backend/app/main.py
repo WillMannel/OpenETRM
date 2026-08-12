@@ -2,6 +2,7 @@ import logging
 
 import redis.asyncio as redis_asyncio
 from fastapi import FastAPI, Response
+from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine
 
@@ -9,14 +10,25 @@ from app.api.v1.router import api_router
 from app.core.config import get_settings
 from app.core.logging import configure_logging
 from app.core.metrics import render_metrics
-from app.core.middleware import RequestContextMiddleware
+from app.core.middleware import RequestContextMiddleware, SecurityHeadersMiddleware
 
 settings = get_settings()
 configure_logging(settings.log_level)
 logger = logging.getLogger(__name__)
 
 app = FastAPI(title=settings.app_name, version="0.1.0")
+# Middleware order matters: Starlette applies them outermost-last-added, so
+# CORSMiddleware (added last) wraps everything else, and gets first look at a
+# preflight OPTIONS request before it ever reaches RequestContextMiddleware/routing.
 app.add_middleware(RequestContextMiddleware)
+app.add_middleware(SecurityHeadersMiddleware)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=settings.cors_allowed_origins_list,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 app.include_router(api_router, prefix=settings.api_prefix)
 
 

@@ -60,9 +60,19 @@ services:
       REDIS_URL: redis://redis:6379/0
       ENVIRONMENT: development # see the api service's comment above
     command: ["arq", "app.tasks.worker.WorkerSettings"]
+    # backend/Dockerfile's HEALTHCHECK curls the API's /health -- meaningless here,
+    # arq's worker never listens on that port. Disabling the inherited check rather
+    # than leaving it to just always report unhealthy.
+    healthcheck:
+      test: ["NONE"]
 
   web:
-    build: ./frontend
+    # Dockerfile.dev, not ./frontend's default production Dockerfile: this stack is
+    # local-dev/demo (hot reload, runtime VITE_API_BASE_URL) -- see Dockerfile.dev's
+    # header comment and frontend/Dockerfile's for the deployable production image.
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.dev
     depends_on:
       - api
     environment:

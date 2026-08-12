@@ -168,4 +168,46 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: docker build -t openetrm-api ./backend
+      # frontend/Dockerfile (the default) is the production nginx image;
+      # Dockerfile.dev is what docker-compose.yml's `web` service actually runs --
+      # both need to build cleanly, since a broken Dockerfile.dev would silently
+      # never be caught by building only the default one.
       - run: docker build -t openetrm-web ./frontend
+      - run: docker build -t openetrm-web-dev -f ./frontend/Dockerfile.dev ./frontend
+
+  # Fails the build on a known-vulnerable dependency. Advisory-only in spirit (pins
+  # aren't bumped automatically here -- see FUTURE_WORK.md), but a red check here is
+  # meant to actually block a merge, not just log a warning nobody reads.
+  dependency-audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      # Upgrade pip/setuptools first -- the runner image's bundled versions are
+      # whatever was current when that image was built, not necessarily patched
+      # against the latest advisories (caught locally: a stale bundled setuptools
+      # flagged a real CVE that `pip install --upgrade` alone resolved).
+      - run: pip install --upgrade pip setuptools pip-audit
+      - run: pip install -e ".[dev]"
+        working-directory: backend
+      # --local: audits exactly what's installed in this environment (this project's
+      # own pins + their resolved transitive deps), not pip-audit's own environment.
+      - run: pip-audit --local
+        working-directory: backend
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm install
+        working-directory: frontend
+      # --omit=dev: gate on what actually ships to users. The dev-only vite/vitest/
+      # esbuild chain (build tooling, never bundled into the production output)
+      # carries its own advisories most Vite projects live with until a major-version
+      # bump; blocking merges on those would be noisy enough to get ignored, and
+      # they're not part of what a deployed instance actually runs -- see
+      # FUTURE_WORK.md for tracking that upgrade separately from this gate.
+      - run: npm audit --omit=dev --audit-level=high
+        working-directory: frontend
