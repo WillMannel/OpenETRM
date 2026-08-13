@@ -54,6 +54,11 @@ async def readiness(response: Response) -> dict[str, object]:
     connection from *this* check to a future request on a different event loop (bit
     us for real under pytest-asyncio's per-test-function event loops, where the shared
     engine was getting reused across tests each on their own loop)."""
+    # This endpoint is unauthenticated (orchestrators/load balancers need to probe it
+    # without a credential) -- checks below deliberately report only "ok"/"error",
+    # never the raw exception string. The full exception (hostnames, ports, driver
+    # error text) still goes to the server-side log for whoever's actually debugging
+    # the outage; it just isn't handed to an anonymous caller as reconnaissance.
     checks: dict[str, str] = {}
     healthy = True
 
@@ -64,7 +69,7 @@ async def readiness(response: Response) -> dict[str, object]:
         checks["database"] = "ok"
     except Exception as exc:
         healthy = False
-        checks["database"] = f"error: {exc}"
+        checks["database"] = "error"
         logger.warning("readiness check: database unreachable: %s", exc)
     finally:
         await probe_engine.dispose()
@@ -75,7 +80,7 @@ async def readiness(response: Response) -> dict[str, object]:
         checks["redis"] = "ok"
     except Exception as exc:
         healthy = False
-        checks["redis"] = f"error: {exc}"
+        checks["redis"] = "error"
         logger.warning("readiness check: redis unreachable: %s", exc)
     finally:
         await redis_client.aclose()

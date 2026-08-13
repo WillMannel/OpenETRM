@@ -380,3 +380,38 @@ class RiskService:
             # with N live option trades, for zero information gain.
             await self._session.commit()
         return results
+
+    async def get_var_result(self, var_result_id: uuid.UUID, *, actor: User) -> VarResult:
+        """Entitlement-checked fetch of a previously-persisted VarResult by id --
+        without this, GET /risk/var/{id} would let any authenticated user read any
+        book's VaR by guessing/observing its id, bypassing the exact desk-separation
+        `run_var` enforces on write (see ARCHITECTURE.md's "Book-level entitlements"
+        and "Internal security-review pass" sections)."""
+        result = await self._session.get(VarResult, var_result_id)
+        if result is None:
+            raise NotFoundError("VarResult", str(var_result_id))
+        await self._assert_can_access_risk_scope(actor, result.book_id)
+        return result
+
+    async def get_stress_result(
+        self, stress_result_id: uuid.UUID, *, actor: User
+    ) -> StressResultRow:
+        """See get_var_result's docstring -- same gap, same fix, for stress-test
+        results. `StressResult.book_id` is never null (unlike VarResult's), but
+        `_assert_can_access_risk_scope` handles both correctly either way."""
+        result = await self._session.get(StressResultRow, stress_result_id)
+        if result is None:
+            raise NotFoundError("StressResult", str(stress_result_id))
+        await self._assert_can_access_risk_scope(actor, result.book_id)
+        return result
+
+    async def get_option_greeks_result(
+        self, result_id: uuid.UUID, *, actor: User
+    ) -> OptionGreeksResult:
+        """See get_var_result's docstring -- same gap, same fix, for option-greeks
+        results."""
+        result = await self._session.get(OptionGreeksResult, result_id)
+        if result is None:
+            raise NotFoundError("OptionGreeksResult", str(result_id))
+        await self._assert_can_access_risk_scope(actor, result.book_id)
+        return result

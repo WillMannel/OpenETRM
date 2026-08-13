@@ -270,6 +270,170 @@ async def test_outsider_export_of_a_walled_book_is_forbidden_by_id_and_empty_unf
     assert trade_id not in [row["id"] for row in unfiltered.json()]
 
 
+async def _confirmed_swap_and_curve(
+    client: AsyncClient, cp_id: str, book_id: str, admin_headers: dict
+) -> str:
+    """Books, confirms, and curve-builds a swap in `book_id` using `admin_headers`
+    for every step (ADMIN passes every role check, so one caller can do the whole
+    trader+risk_manager flow) -- returns the confirmed trade's id. Used to get a
+    real persisted VarResult/StressResult/OptionGreeksResult into a walled book so
+    the tests below can prove an outsider can't read it back by id."""
+    trade_resp = await client.post(
+        "/api/v1/trades", json=_trade_payload(cp_id, book_id), headers=admin_headers
+    )
+    trade_id = trade_resp.json()["id"]
+    confirm = await client.post(f"/api/v1/trades/{trade_id}/confirm", headers=admin_headers)
+    assert confirm.status_code == 200
+
+    quote = await client.post(
+        "/api/v1/market-data/quotes",
+        json={"quote_date": "2026-01-10", "delivery_month": "2026-06-01", "price": 3.10},
+        headers=admin_headers,
+    )
+    assert quote.status_code == 201
+    build = await client.post(
+        "/api/v1/curves/build", json={"as_of_date": "2026-01-10"}, headers=admin_headers
+    )
+    assert build.status_code == 201
+    return trade_id
+
+
+@pytest.mark.asyncio
+async def test_outsider_cannot_read_a_var_result_for_a_walled_book_by_id(
+    client: AsyncClient, db_session: AsyncSession, auth_headers: AuthHeadersFactory
+):
+    """GET /risk/var/{id} previously had no entitlement check at all (only
+    POST /risk/var/run did) -- any authenticated user who obtained a var_result_id
+    could read another desk's VaR. See ARCHITECTURE.md's "Internal security-review
+    pass"."""
+    admin = await auth_headers(UserRole.ADMIN, username="wall-admin-var-id")
+    member = await auth_headers(UserRole.TRADER, username="wall-member-var-id")
+    outsider = await auth_headers(UserRole.RISK_MANAGER, username="wall-outsider-var-id")
+    cp_id, book_id = await _seed_restricted_book(client, db_session, admin)
+    await _grant(client, book_id, await _user_id(db_session, "wall-member-var-id"), admin)
+    await _confirmed_swap_and_curve(client, cp_id, book_id, admin)
+
+    run_resp = await client.post(
+        "/api/v1/risk/var/run",
+        json={"book_id": book_id, "as_of_date": "2026-01-10", "confidence_level": 95},
+        headers=admin,
+    )
+    assert run_resp.status_code == 201
+    var_result_id = run_resp.json()["id"]
+
+    outsider_resp = await client.get(f"/api/v1/risk/var/{var_result_id}", headers=outsider)
+    assert outsider_resp.status_code == 403
+
+    # A member of the walled book (not just ADMIN) can still read it -- proof this
+    # isn't over-restricted to ADMIN-only.
+    member_resp = await client.get(f"/api/v1/risk/var/{var_result_id}", headers=member)
+    assert member_resp.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_outsider_cannot_read_a_stress_result_for_a_walled_book_by_id(
+    client: AsyncClient, db_session: AsyncSession, auth_headers: AuthHeadersFactory
+):
+    admin = await auth_headers(UserRole.ADMIN, username="wall-admin-stress-id")
+    outsider = await auth_headers(UserRole.RISK_MANAGER, username="wall-outsider-stress-id")
+    cp_id, book_id = await _seed_restricted_book(client, db_session, admin)
+    await _confirmed_swap_and_curve(client, cp_id, book_id, admin)
+
+    run_resp = await client.post(
+        "/api/v1/risk/stress-test",
+        json={"book_id": book_id, "as_of_date": "2026-01-10"},
+        headers=admin,
+    )
+    assert run_resp.status_code == 200
+    stress_result_id = run_resp.json()["results"][0]["id"]
+
+    outsider_resp = await client.get(f"/api/v1/risk/stress/{stress_result_id}", headers=outsider)
+    assert outsider_resp.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_outsider_cannot_read_an_option_greeks_result_for_a_walled_book_by_id(
+    client: AsyncClient, db_session: AsyncSession, auth_headers: AuthHeadersFactory
+):
+    admin = await auth_headers(UserRole.ADMIN, username="wall-admin-greeks-id")
+    outsider = await auth_headers(UserRole.RISK_MANAGER, username="wall-outsider-greeks-id")
+    cp_id, book_id = await _seed_restricted_book(client, db_session, admin)
+
+    trade_resp = await client.post(
+        "/api/v1/trades",
+        json={
+            "trade_date": "2026-01-10",
+            "counterparty_id": cp_id,
+            "book_id": book_id,
+            "trade_type": "OPTION",
+            "buy_sell": "BUY",
+            "volume": 1000,
+            "delivery_start_month": "2026-06-01",
+            "delivery_end_month": "2026-06-01",
+            "option_type": "CALL",
+            "strike_price": 3.00,
+            "premium": 0.20,
+            "option_volatility": 0.35,
+        },
+        headers=admin,
+    )
+    trade_id = trade_resp.json()["id"]
+    confirm_resp = await client.post(f"/api/v1/trades/{trade_id}/confirm", headers=admin)
+    assert confirm_resp.status_code == 200
+    await client.post(
+        "/api/v1/market-data/quotes",
+        json={"quote_date": "2026-01-10", "delivery_month": "2026-06-01", "price": 3.10},
+        headers=admin,
+    )
+    assert (
+        await client.post("/api/v1/curves/build", json={"as_of_date": "2026-01-10"}, headers=admin)
+    ).status_code == 201
+
+    run_resp = await client.post(
+        "/api/v1/risk/options/greeks",
+        json={"book_id": book_id, "as_of_date": "2026-01-10", "commodity": "HENRY_HUB"},
+        headers=admin,
+    )
+    assert run_resp.status_code == 200
+    result_id = run_resp.json()["results"][0]["id"]
+
+    outsider_resp = await client.get(f"/api/v1/risk/options/greeks/{result_id}", headers=outsider)
+    assert outsider_resp.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_outsider_cannot_read_audit_history_of_a_trade_in_a_walled_book(
+    client: AsyncClient, db_session: AsyncSession, auth_headers: AuthHeadersFactory
+):
+    """GET /audit/{entity_type}/{entity_id} previously allowed any authenticated
+    user regardless of book entitlement -- audit entries embed a full before/after
+    trade-economics snapshot (see TradeCaptureService._trade_snapshot), so this was
+    a way to read a walled book's trade economics without ever touching
+    GET /trades/{id}. See ARCHITECTURE.md's "Internal security-review pass"."""
+    admin = await auth_headers(UserRole.ADMIN, username="wall-admin-audit")
+    member = await auth_headers(UserRole.TRADER, username="wall-member-audit")
+    outsider = await auth_headers(UserRole.TRADER, username="wall-outsider-audit")
+    cp_id, book_id = await _seed_restricted_book(client, db_session, admin)
+    await _grant(client, book_id, await _user_id(db_session, "wall-member-audit"), admin)
+
+    create_resp = await client.post(
+        "/api/v1/trades", json=_trade_payload(cp_id, book_id), headers=admin
+    )
+    trade_id = create_resp.json()["id"]
+
+    outsider_resp = await client.get(f"/api/v1/audit/Trade/{trade_id}", headers=outsider)
+    assert outsider_resp.status_code == 403
+
+    # A member of the walled book can still read its audit history -- proof this
+    # isn't over-restricted to ADMIN-only.
+    member_resp = await client.get(f"/api/v1/audit/Trade/{trade_id}", headers=member)
+    assert member_resp.status_code == 200
+    assert len(member_resp.json()) >= 1
+
+    admin_resp = await client.get(f"/api/v1/audit/Trade/{trade_id}", headers=admin)
+    assert admin_resp.status_code == 200
+
+
 @pytest.mark.asyncio
 async def test_revoking_membership_removes_access(
     client: AsyncClient, db_session: AsyncSession, auth_headers: AuthHeadersFactory

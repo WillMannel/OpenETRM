@@ -51,26 +51,40 @@ pre-trade limit checks)
 
 | Query | Rows returned | Wall-clock time |
 |---|---|---|
-| Single book, commodity-scoped | 1,500 | 37–50 ms |
-| Portfolio-wide (`book_id=None`), commodity-scoped | 15,000 (across 10 books) | **1.2–1.4 s** |
-| Same portfolio-wide predicate, `COUNT(*)` only (no row hydration) | 15,000 matched | **6.3 ms** |
+| Single book, commodity-scoped | 1,500 | 29–50 ms |
+| Portfolio-wide (`book_id=None`), commodity-scoped | 15,000 (across 10 books) | **770–805 ms** (was 1.2–1.4 s — see below) |
+| Same portfolio-wide predicate, `COUNT(*)` only (no row hydration) | 15,000 matched | **6–10 ms** |
 
 The `COUNT(*)` comparison is the important finding here: it isolates the
-query-planner/index cost from the ORM-hydration/network cost. The gap (6 ms vs.
-1.2–1.4 s) shows the new index (`ix_trades_commodity_status` — see
-`ARCHITECTURE.md`) makes the *query itself* fast; what actually dominates
-wall-clock time at 15,000 rows is materializing 15,000 full `Trade` ORM objects,
-each eager-joining `Trade.counterparty`/`Trade.book` (`lazy="joined"`, so every
-row pulls in two more tables' worth of data even though a risk computation only
-needs `volume`/`fixed_price`/`buy_sell`/`delivery_start_month`/etc., never the
-counterparty's name). **This is the next bottleneck to fix, once (if) a real
-portfolio-wide risk run at this scale becomes a common operation** — the
-straightforward fix is a leaner projection query for callers (like
-`ValuationService`/`RiskService`) that only need trade economics, not the full
-`TradeRead` shape `GET /trades` needs. Not fixed here: it's a real, separable
-optimization, not part of what P1-9's index audit targeted, and speculatively
-restructuring the ORM loading strategy without a concrete caller that needs it
-risks solving the wrong problem. Tracked in `FUTURE_WORK.md`.
+query-planner/index cost from the ORM-hydration/network cost. The gap (6–10 ms vs.
+770–805 ms) shows the new index (`ix_trades_commodity_status` — see
+`ARCHITECTURE.md`) makes the *query itself* fast; the rest is the cost of
+materializing 15,000 full `Trade` ORM objects.
+
+**Task P1-13 closed part of that gap**: `Trade.counterparty`/`Trade.book` were
+`lazy="joined"` at the model level, so every row in this query pulled in two more
+tables' worth of data even though every caller of `list_live` (valuation's
+position-building, risk's trade fetches, trade_capture's pre-trade limit checks)
+only ever touches trade economics, never the counterparty's name or book's
+description. `TradeRepository.list_live` now overrides that with `lazyload` for
+this query specifically (`TradeRepository.list`/`.get` — the trade-blotter/
+detail-view methods, which DO need those names — are unaffected). Measured effect
+at this same 15,000-row portfolio-wide scale: **1.2–1.4 s → 770–805 ms, roughly a
+40% reduction** for exactly the query this benchmark was built to characterize.
+
+**What's left, honestly**: 770–805 ms is still ~100x the bare `COUNT(*)` time, not
+close to it — removing the join closed the *join* cost, not the cost of
+constructing 15,000 Python `Trade` objects themselves (attribute assignment,
+`Decimal`/`date` conversions, identity-map bookkeeping), which is inherent
+SQLAlchemy ORM overhead independent of any join. Closing that further would mean
+moving away from full ORM-object hydration for this query entirely — a column-
+level projection (`select(Trade.id, Trade.volume, ...)` instead of `select(Trade)`)
+returning plain tuples/`Row`s instead of ORM instances. Not done here: it's a
+larger, more invasive change (every caller currently expects `Trade` objects, not
+row tuples) than P1-13's scope, and — same reasoning P1-9's original finding
+used — speculatively restructuring further without a concrete caller actually
+reaching this scale in production risks solving the wrong problem. Tracked in
+`FUTURE_WORK.md`.
 
 Confirmed via `EXPLAIN` that the index is actually used (not just present):
 ```

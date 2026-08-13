@@ -11,7 +11,6 @@ from app.common.exceptions import ForbiddenError, NotFoundError
 from app.common.job_schemas import JobEnqueuedRead, JobStatusRead
 from app.core.jobs import get_job_snapshot
 from app.modules.auth.models import User
-from app.modules.risk.models import OptionGreeksResult, StressResult, VarResult
 from app.modules.risk.schemas import (
     DeltaLadderRead,
     DeltaLadderRunRequest,
@@ -93,11 +92,15 @@ async def get_var_job(
 async def get_var_result(
     var_result_id: uuid.UUID,
     session: AsyncSession = Depends(get_db),
-    _user: User = Depends(get_current_user),
+    actor: User = Depends(get_current_user),
 ) -> VarResultRead:
-    result = await session.get(VarResult, var_result_id)
-    if result is None:
-        raise HTTPException(status_code=404, detail=f"VarResult not found: {var_result_id}")
+    service = RiskService(session)
+    try:
+        result = await service.get_var_result(var_result_id, actor=actor)
+    except NotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ForbiddenError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
     return VarResultRead.model_validate(result)
 
 
@@ -190,11 +193,15 @@ async def run_stress_test(
 async def get_stress_result(
     stress_result_id: uuid.UUID,
     session: AsyncSession = Depends(get_db),
-    _user: User = Depends(get_current_user),
+    actor: User = Depends(get_current_user),
 ) -> StressResultRead:
-    result = await session.get(StressResult, stress_result_id)
-    if result is None:
-        raise HTTPException(status_code=404, detail=f"StressResult not found: {stress_result_id}")
+    service = RiskService(session)
+    try:
+        result = await service.get_stress_result(stress_result_id, actor=actor)
+    except NotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ForbiddenError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
     return StressResultRead.model_validate(result)
 
 
@@ -255,9 +262,13 @@ async def run_option_greeks(
 async def get_option_greeks_result(
     result_id: uuid.UUID,
     session: AsyncSession = Depends(get_db),
-    _user: User = Depends(get_current_user),
+    actor: User = Depends(get_current_user),
 ) -> OptionGreeksRead:
-    result = await session.get(OptionGreeksResult, result_id)
-    if result is None:
-        raise HTTPException(status_code=404, detail=f"OptionGreeksResult not found: {result_id}")
+    service = RiskService(session)
+    try:
+        result = await service.get_option_greeks_result(result_id, actor=actor)
+    except NotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ForbiddenError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
     return OptionGreeksRead.model_validate(result)

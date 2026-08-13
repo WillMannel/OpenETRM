@@ -848,7 +848,11 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Get Audit History */
+        /**
+         * Get Audit History
+         * @description Entitlement-checked -- see AuditService.history_for's docstring for why this
+         *     can't be a plain "any authenticated user" read.
+         */
         get: operations["get_audit_history_api_v1_audit__entity_type___entity_id__get"];
         put?: never;
         post?: never;

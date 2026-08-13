@@ -317,18 +317,21 @@ from what that task closed:
 missing indexes, an unbounded `GET /trades` limit, an N+1 refresh loop -- but
 identified a few real, larger pieces deliberately left for later:
 
-- **Leaner projection queries for bulk trade reads**: `PERFORMANCE.md`'s benchmark
-  shows a portfolio-wide `TradeRepository.list_live` at 15,000 rows costs ~6ms for
-  the query itself (confirmed via a bare `COUNT(*)`) but ~1.2-1.4s once ORM
-  hydration is included -- `Trade.counterparty`/`.book` are `lazy="joined"`, so
-  every row eager-joins two more tables even when the caller (e.g.
-  `ValuationService.build_positions`, which only touches `volume`/`fixed_price`
-  /`buy_sell`/delivery dates) never needs the counterparty's name or the book's
-  description. A leaner query -- either a narrower column projection or
-  `lazy="selectin"` for bulk-list contexts specifically -- would close this, but
-  wasn't speculatively built without a concrete caller actually reaching this
-  scale in production; premature optimization here risks solving the wrong shape
-  of problem.
+- **Column-level projection for bulk trade reads** (task P1-13 closed *part* of
+  this, not all of it): `TradeRepository.list_live` no longer eager-joins
+  `Trade.counterparty`/`.book` (see `ARCHITECTURE.md`'s "Scale and performance"),
+  which cut the portfolio-wide 15,000-row benchmark from ~1.2-1.4s to
+  ~770-805ms. What's left is the cost of constructing 15,000 full `Trade` ORM
+  objects themselves (`Decimal`/`date` conversions, attribute assignment,
+  identity-map bookkeeping) -- inherent SQLAlchemy overhead, not a join, and
+  `PERFORMANCE.md`'s `COUNT(*)` comparison (6-10ms) shows there's still real
+  headroom between the query and the hydrated result. Closing that further means
+  a genuine column-level projection (`select(Trade.id, Trade.volume, ...)`
+  returning plain `Row`s instead of `Trade` instances) for callers like
+  `ValuationService.build_positions`/`RiskService` that only touch trade
+  economics -- a larger change than P1-13's scope (every current caller expects
+  `Trade` objects, not row tuples), not speculatively built without a concrete
+  caller actually reaching a scale where it matters in production.
 - **Timescale compression + retention policies**: `market_data_points` is a bare
   hypertable (Timescale's default 7-day chunking, no `add_compression_policy`/
   `add_retention_policy`). Deferred for the same reason task P1-8's managed-secrets
@@ -397,11 +400,6 @@ later:
   built image serve every environment; not built here since v1 has exactly one
   deployment target and the extra layer of indirection isn't earning its
   complexity yet.
-- **Container image vulnerability scanning** (Trivy/Grype against the built
-  images, not just `pip-audit`/`npm audit` against source dependencies) — would
-  catch OS-package CVEs in the `python:3.11-slim`/`nginxinc/nginx-unprivileged`
-  base images themselves, which dependency-level scanning can't see. Natural next
-  step for the `docker-build` CI job once there's an image registry to scan against.
 - **`vite`/`vitest`/`esbuild` dev-tooling advisories**: `npm audit` (unscoped)
   currently reports moderate/high/critical findings entirely inside the
   dev-only Vite/Vitest/esbuild build-tooling chain — never bundled into the

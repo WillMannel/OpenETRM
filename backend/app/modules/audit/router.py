@@ -1,9 +1,10 @@
 import uuid
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user, get_db
+from app.common.exceptions import ForbiddenError
 from app.modules.audit.schemas import AuditLogRead
 from app.modules.audit.service import AuditService
 from app.modules.auth.models import User
@@ -16,8 +17,13 @@ async def get_audit_history(
     entity_type: str,
     entity_id: uuid.UUID,
     session: AsyncSession = Depends(get_db),
-    _user: User = Depends(get_current_user),  # any authenticated user; v1 has no per-book ACLs
+    actor: User = Depends(get_current_user),
 ) -> list[AuditLogRead]:
+    """Entitlement-checked -- see AuditService.history_for's docstring for why this
+    can't be a plain "any authenticated user" read."""
     service = AuditService(session)
-    entries = await service.history_for(entity_type, entity_id)
+    try:
+        entries = await service.history_for(entity_type, entity_id, actor=actor)
+    except ForbiddenError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
     return [AuditLogRead.model_validate(e) for e in entries]

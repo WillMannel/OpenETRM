@@ -3,6 +3,7 @@ import uuid
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import lazyload
 
 from app.common.enums import LIVE_TRADE_STATUSES, ChangeRequestStatus, Commodity
 from app.modules.trade_capture.models import Book, Counterparty, Trade, TradeChangeRequest
@@ -88,8 +89,31 @@ class TradeRepository:
         commodities together (see test_multi_commodity_book.py). The single shared
         query every one of those call sites goes through.
         (Return type is spelled `builtins.list` because this class also defines a
-        method named `list`, which otherwise shadows the builtin generic for mypy.)"""
-        stmt = select(Trade).where(Trade.status.in_([s.value for s in LIVE_TRADE_STATUSES]))
+        method named `list`, which otherwise shadows the builtin generic for mypy.)
+
+        Overrides `Trade.counterparty`/`.book`'s model-level `lazy="joined"` with
+        `lazyload` here specifically -- every *current* caller of this method
+        (valuation's position-building, risk's trade fetches, trade_capture's
+        pre-trade limit checks) only ever touches trade economics (volume, price,
+        dates, buy_sell, commodity), never the counterparty's name or book's
+        description, so skipping the eager join avoids its cost entirely for them.
+        `lazyload` rather than `noload` deliberately: it still lazy-loads correctly
+        (one query, on demand) if some future caller *does* touch `.counterparty`/
+        `.book` on a Trade from this method, whereas `noload` would silently hand
+        back `None` for a relationship whose FK is NOT NULL -- a wrong-data bug
+        that's easy to introduce later and easy to miss in review, versus a lazy
+        load that's merely a missed optimization. At realistic scale this join
+        dominated wall-clock time far more than the query itself (task P1-9's
+        benchmark: ~6ms for the bare query vs. ~1.2-1.4s once hydration was
+        included, at 15,000 rows -- see PERFORMANCE.md and ARCHITECTURE.md's "Scale
+        and performance"). `TradeRepository.list`/`.get` (the trade-blotter/
+        detail-view methods, which DO need counterparty/book names for
+        `TradeRead`) are unaffected -- this override is scoped to this one query."""
+        stmt = (
+            select(Trade)
+            .where(Trade.status.in_([s.value for s in LIVE_TRADE_STATUSES]))
+            .options(lazyload(Trade.counterparty), lazyload(Trade.book))
+        )
         if book_id is not None:
             stmt = stmt.where(Trade.book_id == book_id)
         if commodity is not None:
