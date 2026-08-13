@@ -33,7 +33,17 @@ WORKDIR /app
 # HEALTHCHECK in docker-compose.yml instead of this being wasted on it).
 RUN apt-get update && apt-get install -y --no-install-recommends curl \
     && rm -rf /var/lib/apt/lists/* \
-    && useradd --create-home --uid 10001 --shell /usr/sbin/nologin appuser
+    && useradd --create-home --uid 10001 --shell /usr/sbin/nologin appuser \
+    # This stage is a fresh `FROM python:3.11-slim`, not derived from the builder
+    # stage -- it carries its own copy of whatever pip/setuptools/wheel the base
+    # image bundles, entirely separate from (and never used instead of) the venv's
+    # copy below, which is what actually runs this app. Upgrading the venv's copy
+    # (see the builder stage) left THIS copy untouched -- Trivy's filesystem-wide
+    # package scan still found it and still flagged the same CVEs (jaraco.context/
+    # wheel) after that fix. Since nothing in this stage ever invokes the base
+    # image's own pip, the more permanent fix is removing it outright: no
+    # vulnerable version to chase, and a smaller final image besides.
+    && python -m pip uninstall --yes pip setuptools wheel 2>/dev/null || true
 
 COPY --from=builder /opt/venv /opt/venv
 COPY --from=builder /app /app
