@@ -181,14 +181,14 @@ jobs:
       # isn't something this repo can act on by bumping a pin; failing the build on
       # those would be a gate nobody can close, just noise to route around.
       - name: Scan openetrm-api for CRITICAL/HIGH CVEs
-        uses: aquasecurity/trivy-action@v0.29.0
+        uses: aquasecurity/trivy-action@v0.24.0
         with:
           image-ref: openetrm-api
           severity: CRITICAL,HIGH
           ignore-unfixed: true
           exit-code: "1"
       - name: Scan openetrm-web for CRITICAL/HIGH CVEs
-        uses: aquasecurity/trivy-action@v0.29.0
+        uses: aquasecurity/trivy-action@v0.24.0
         with:
           image-ref: openetrm-web
           severity: CRITICAL,HIGH
