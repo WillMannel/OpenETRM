@@ -21,10 +21,22 @@ ARG VITE_API_BASE_URL
 ENV VITE_API_BASE_URL=$VITE_API_BASE_URL
 RUN npm run build
 
-# nginx-unprivileged: runs as the non-root `nginx` user and listens on 8080 by
-# default (binding <1024 needs root) -- no manual user/permission setup needed,
-# unlike stock nginx:alpine.
+# nginx-unprivileged: runs as the non-root `nginx` user (UID 101) and listens on
+# 8080 by default (binding <1024 needs root) -- no manual user/permission setup
+# needed, unlike stock nginx:alpine.
 FROM nginxinc/nginx-unprivileged:1.27-alpine
+# Whatever Alpine package versions this tag happened to bundle at its own build
+# time go stale the moment new CVEs land -- caught by this image's own Trivy scan
+# in CI: 33 CRITICAL/HIGH OS-package CVEs (openssl, libxml2, libpng, libexpat,
+# c-ares, musl, nghttp2, zlib), every one with a fix already published upstream.
+# `apk upgrade` at build time (not just a fresher base tag, which would just go
+# stale again) means every image build picks up whatever's currently patched,
+# not whatever was current when this tag was last pushed. Needs root -- the base
+# image already switched to the non-root nginx user (UID 101) in its own
+# Dockerfile, so switch back before apk and forward again after.
+USER root
+RUN apk update && apk upgrade --no-cache
+USER 101
 COPY nginx.conf /etc/nginx/conf.d/default.conf
 COPY --from=build /app/dist /usr/share/nginx/html
 
