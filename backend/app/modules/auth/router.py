@@ -1,0 +1,208 @@
+import uuid
+
+import redis.asyncio as redis_asyncio
+from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.api.deps import get_db, require_role
+from app.common.enums import UserRole
+from app.common.exceptions import NotFoundError, ValidationFailedError
+from app.core.redis_client import get_redis_client
+from app.modules.auth.deps import get_current_user
+from app.modules.auth.models import User
+from app.modules.auth.rate_limit import (
+    LoginRateLimitExceeded,
+    clear_login_attempts,
+    enforce_login_rate_limit,
+    record_login_failure,
+)
+from app.modules.auth.revocation import revoke_token
+from app.modules.auth.schemas import (
+    AdminUserCreate,
+    ApiKeyCreate,
+    ApiKeyCreated,
+    ApiKeyRead,
+    LoginRequest,
+    LogoutRequest,
+    RefreshRequest,
+    TokenResponse,
+    UserRead,
+    UserRegister,
+)
+from app.modules.auth.security import InvalidTokenError, decode_access_token
+from app.modules.auth.service import AuthService
+
+router = APIRouter(prefix="/auth", tags=["auth"])
+_bearer_scheme = HTTPBearer(auto_error=False)
+
+
+@router.post("/register", response_model=UserRead, status_code=201)
+async def register(payload: UserRegister, session: AsyncSession = Depends(get_db)) -> UserRead:
+    service = AuthService(session)
+    try:
+        user = await service.register(payload)
+    except ValidationFailedError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return UserRead.model_validate(user)
+
+
+@router.post("/login", response_model=TokenResponse)
+async def login(
+    payload: LoginRequest,
+    request: Request,
+    session: AsyncSession = Depends(get_db),
+    redis: redis_asyncio.Redis = Depends(get_redis_client),
+) -> TokenResponse:
+    """Rate-limited: more than Settings.login_rate_limit_max_attempts failed
+    attempts for the same (client IP, username) pair within the window gets a 429
+    -- see app.modules.auth.rate_limit. `request.client.host` is the direct TCP
+    peer, not an `X-Forwarded-For` header -- a deployment behind a reverse proxy
+    needs to terminate/normalize that itself (e.g. Starlette's
+    `ProxyHeadersMiddleware`) for this to reflect real client IPs; blindly trusting
+    a client-supplied header here would let an attacker bypass the limiter by
+    sending a different one on every request."""
+    client_ip = request.client.host if request.client is not None else "unknown"
+    try:
+        await enforce_login_rate_limit(redis, client_ip, payload.username)
+    except LoginRateLimitExceeded as exc:
+        raise HTTPException(
+            status_code=429,
+            detail=str(exc),
+            headers={"Retry-After": str(exc.retry_after_seconds)},
+        ) from exc
+
+    service = AuthService(session)
+    try:
+        tokens = await service.authenticate(payload)
+    except ValidationFailedError as exc:
+        await record_login_failure(redis, client_ip, payload.username)
+        raise HTTPException(status_code=401, detail=str(exc)) from exc
+    await clear_login_attempts(redis, client_ip, payload.username)
+    return TokenResponse(access_token=tokens.access_token, refresh_token=tokens.refresh_token)
+
+
+@router.post("/refresh", response_model=TokenResponse)
+async def refresh(
+    payload: RefreshRequest, session: AsyncSession = Depends(get_db)
+) -> TokenResponse:
+    """Exchanges a refresh token for a new access + refresh token pair, rotating the
+    presented one (single-use -- see AuthService.refresh)."""
+    service = AuthService(session)
+    try:
+        tokens = await service.refresh(payload.refresh_token)
+    except ValidationFailedError as exc:
+        raise HTTPException(status_code=401, detail=str(exc)) from exc
+    return TokenResponse(access_token=tokens.access_token, refresh_token=tokens.refresh_token)
+
+
+@router.post("/logout", status_code=204)
+async def logout(
+    payload: LogoutRequest,
+    credentials: HTTPAuthorizationCredentials | None = Depends(_bearer_scheme),
+    session: AsyncSession = Depends(get_db),
+    _user: User = Depends(get_current_user),  # requires a currently-valid access token
+    redis: redis_asyncio.Redis = Depends(get_redis_client),
+) -> None:
+    """Revokes the access token used to authenticate this call (added to the Redis
+    denylist -- see app.modules.auth.revocation) and, if provided, the refresh token
+    too. Both are optional to actually revoke successfully in isolation: a caller
+    might only have the access token handy (e.g. from an API-key-authenticated
+    session, where there's no refresh token to speak of)."""
+    if credentials is not None:
+        try:
+            decoded = decode_access_token(credentials.credentials)
+            await revoke_token(redis, decoded.jti, decoded.expires_at)
+        except InvalidTokenError:
+            pass  # already invalid/expired -- nothing to revoke
+    if payload.refresh_token is not None:
+        service = AuthService(session)
+        await service.revoke_refresh_token(payload.refresh_token)
+
+
+@router.get("/me", response_model=UserRead)
+async def get_me(current_user: User = Depends(get_current_user)) -> UserRead:
+    return UserRead.model_validate(current_user)
+
+
+@router.post("/users", response_model=UserRead, status_code=201)
+async def create_user(
+    payload: AdminUserCreate,
+    session: AsyncSession = Depends(get_db),
+    _admin: User = Depends(require_role(UserRole.ADMIN)),
+) -> UserRead:
+    """Admin-only: create a user with any role. This is how TRADER/RISK_MANAGER/ADMIN
+    accounts get provisioned -- self-registration always lands as VIEWER."""
+    service = AuthService(session)
+    try:
+        user = await service.create_user_as_admin(payload)
+    except ValidationFailedError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return UserRead.model_validate(user)
+
+
+@router.get("/users", response_model=list[UserRead])
+async def list_users(
+    session: AsyncSession = Depends(get_db),
+    _admin: User = Depends(require_role(UserRole.ADMIN)),
+) -> list[UserRead]:
+    service = AuthService(session)
+    return [UserRead.model_validate(u) for u in await service.list_users()]
+
+
+@router.post("/users/{user_id}/api-keys", response_model=ApiKeyCreated, status_code=201)
+async def create_api_key(
+    user_id: uuid.UUID,
+    payload: ApiKeyCreate,
+    session: AsyncSession = Depends(get_db),
+    admin: User = Depends(require_role(UserRole.ADMIN)),
+) -> ApiKeyCreated:
+    """Admin-only: mint a machine-to-machine credential for a service-account User
+    (provision the user via POST /auth/users first -- typically VIEWER, for a
+    read-only BI/pipeline integration). `api_key` in the response is the raw key --
+    it's shown here exactly once and cannot be retrieved again, only revoked."""
+    service = AuthService(session)
+    try:
+        api_key, raw_key = await service.create_api_key(user_id, payload, admin)
+    except NotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValidationFailedError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return ApiKeyCreated(
+        id=api_key.id,
+        name=api_key.name,
+        key_prefix=api_key.key_prefix,
+        api_key=raw_key,
+        expires_at=api_key.expires_at,
+        created_at=api_key.created_at,
+    )
+
+
+@router.get("/users/{user_id}/api-keys", response_model=list[ApiKeyRead])
+async def list_api_keys(
+    user_id: uuid.UUID,
+    session: AsyncSession = Depends(get_db),
+    _admin: User = Depends(require_role(UserRole.ADMIN)),
+) -> list[ApiKeyRead]:
+    service = AuthService(session)
+    try:
+        keys = await service.list_api_keys(user_id)
+    except NotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return [ApiKeyRead.model_validate(k) for k in keys]
+
+
+@router.post("/api-keys/{api_key_id}/revoke", response_model=ApiKeyRead)
+async def revoke_api_key(
+    api_key_id: uuid.UUID,
+    session: AsyncSession = Depends(get_db),
+    _admin: User = Depends(require_role(UserRole.ADMIN)),
+) -> ApiKeyRead:
+    service = AuthService(session)
+    try:
+        api_key = await service.revoke_api_key(api_key_id)
+    except NotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValidationFailedError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return ApiKeyRead.model_validate(api_key)

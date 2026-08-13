@@ -25,6 +25,11 @@ happened to work against SQLite locally, which is laxer about this -- don't trus
 One test function means one event loop for the whole scenario, which is both the fix
 and the more honest shape for a test of one continuously-running process serving
 multiple requests.
+
+Auth: this file talks to the real /auth endpoints/DB (no get_current_user override
+either), so it registers and provisions its own users rather than using
+tests/conftest.py's auth_headers fixture (that fixture writes through the *test*
+db_session, a different session/engine than what this file's real app uses).
 """
 
 import asyncio
@@ -63,11 +68,11 @@ def worker_process():
 
 
 async def _poll_until_complete(
-    client: AsyncClient, status_url: str, timeout_s: float = 15.0
+    client: AsyncClient, status_url: str, headers: dict, timeout_s: float = 15.0
 ) -> dict:
     deadline = time.monotonic() + timeout_s
     while time.monotonic() < deadline:
-        resp = await client.get(status_url)
+        resp = await client.get(status_url, headers=headers)
         assert resp.status_code == 200
         body = resp.json()
         if body["status"] == "complete":
@@ -78,63 +83,131 @@ async def _poll_until_complete(
     pytest.fail(f"job at {status_url} did not complete within {timeout_s}s")
 
 
+async def _provision_user(
+    client: AsyncClient, role_bootstrap_password: str = "e2e-pass-12345"
+) -> dict:
+    """Registers a fresh VIEWER via the real /auth/register, then upgrades it straight
+    in the DB to ADMIN (simplest way to get an authorized account without a
+    chicken-and-egg bootstrap step in a test) and logs in for a real token."""
+    from app.common.enums import UserRole
+    from app.core.db import async_session_factory
+    from app.modules.auth.repository import UserRepository
+
+    username = f"e2e-{uuid.uuid4().hex[:8]}"
+    register_resp = await client.post(
+        "/api/v1/auth/register",
+        json={
+            "username": username,
+            "email": f"{username}@example.com",
+            "password": role_bootstrap_password,
+        },
+    )
+    assert register_resp.status_code == 201
+
+    async with async_session_factory() as session:
+        repo = UserRepository(session)
+        user = await repo.get_by_username(username)
+        user.role = UserRole.ADMIN
+        await session.commit()
+
+    login_resp = await client.post(
+        "/api/v1/auth/login", json={"username": username, "password": role_bootstrap_password}
+    )
+    assert login_resp.status_code == 200
+    token = login_resp.json()["access_token"]
+    return {"Authorization": f"Bearer {token}"}
+
+
 @pytest.mark.asyncio
 async def test_curve_build_and_var_run_async_on_real_worker(worker_process):
-    from app.core.db import async_session_factory
+    from app.core.db import async_session_factory, engine
+    from app.core.redis_client import reset_redis_client
     from app.main import app
     from app.modules.trade_capture.models import Book, Counterparty
 
-    async with async_session_factory() as session:
-        counterparty = Counterparty(name=f"E2E Counterparty {uuid.uuid4().hex[:8]}")
-        book = Book(name=f"E2E Book {uuid.uuid4().hex[:8]}")
-        session.add_all([counterparty, book])
-        await session.commit()
-        book_id = str(book.id)
+    try:
+        async with async_session_factory() as session:
+            counterparty = Counterparty(name=f"E2E Counterparty {uuid.uuid4().hex[:8]}")
+            book = Book(name=f"E2E Book {uuid.uuid4().hex[:8]}")
+            session.add_all([counterparty, book])
+            await session.commit()
+            book_id = str(book.id)
 
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
-        # --- curve build: enqueue, poll, verify the worker actually built it ---
-        curve_as_of = date(2026, 3, 10).isoformat()
-        for delivery_month, price in [("2026-06-01", 3.1), ("2026-07-01", 3.2)]:
-            resp = await client.post(
-                "/api/v1/market-data/quotes",
-                json={"quote_date": curve_as_of, "delivery_month": delivery_month, "price": price},
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            headers = await _provision_user(client)
+
+            # --- curve build: enqueue, poll, verify the worker actually built it ---
+            curve_as_of = date(2026, 3, 10).isoformat()
+            for delivery_month, price in [("2026-06-01", 3.1), ("2026-07-01", 3.2)]:
+                resp = await client.post(
+                    "/api/v1/market-data/quotes",
+                    json={
+                        "quote_date": curve_as_of,
+                        "delivery_month": delivery_month,
+                        "price": price,
+                    },
+                    headers=headers,
+                )
+                assert resp.status_code == 201
+
+            curve_enqueue = await client.post(
+                "/api/v1/curves/build-async", json={"as_of_date": curve_as_of}, headers=headers
             )
-            assert resp.status_code == 201
-
-        curve_enqueue = await client.post(
-            "/api/v1/curves/build-async", json={"as_of_date": curve_as_of}
-        )
-        assert curve_enqueue.status_code == 202
-        curve_job_status = await _poll_until_complete(
-            client, f"/api/v1/curves/build-async/{curve_enqueue.json()['job_id']}"
-        )
-        curve_id = curve_job_status["result"]
-        assert curve_id is not None
-
-        curve_resp = await client.get(f"/api/v1/curves/{curve_id}")
-        assert curve_resp.status_code == 200
-        assert len(curve_resp.json()["points"]) == 2
-
-        # --- VaR run: enqueue, poll, verify the worker actually computed it ---
-        var_as_of = date(2026, 3, 11).isoformat()
-        for quote_date, price in [("2026-03-09", 3.0), ("2026-03-10", 3.1), (var_as_of, 3.05)]:
-            resp = await client.post(
-                "/api/v1/market-data/quotes",
-                json={"quote_date": quote_date, "delivery_month": "2026-06-01", "price": price},
+            assert curve_enqueue.status_code == 202
+            curve_job_status = await _poll_until_complete(
+                client, f"/api/v1/curves/build-async/{curve_enqueue.json()['job_id']}", headers
             )
-            assert resp.status_code == 201
+            curve_id = curve_job_status["result"]
+            assert curve_id is not None
 
-        var_enqueue = await client.post(
-            "/api/v1/risk/var/run-async",
-            json={"book_id": book_id, "as_of_date": var_as_of, "scenario_window_days": 30},
-        )
-        assert var_enqueue.status_code == 202
-        var_job_status = await _poll_until_complete(
-            client, f"/api/v1/risk/var/run-async/{var_enqueue.json()['job_id']}"
-        )
-        var_result_id = var_job_status["result"]
-        assert var_result_id is not None
+            curve_resp = await client.get(f"/api/v1/curves/{curve_id}", headers=headers)
+            assert curve_resp.status_code == 200
+            assert len(curve_resp.json()["points"]) == 2
 
-        var_resp = await client.get(f"/api/v1/risk/var/{var_result_id}")
-        assert var_resp.status_code == 200
-        assert var_resp.json()["var_value"] >= 0.0
+            # --- VaR run: enqueue, poll, verify the worker actually computed it ---
+            var_as_of = date(2026, 3, 11).isoformat()
+            # 2026-03-10 x 2026-06-01 was already submitted above (the curve-build
+            # phase) -- uq_market_data_point_commodity_quote_delivery (see task P1-8)
+            # would reject a second submission of the same (commodity, quote_date,
+            # delivery_month), so it's just omitted here; price_history's range query
+            # still picks it up regardless of which phase inserted it.
+            for quote_date, price in [
+                ("2026-03-09", 3.0),
+                (var_as_of, 3.05),
+            ]:
+                resp = await client.post(
+                    "/api/v1/market-data/quotes",
+                    json={
+                        "quote_date": quote_date,
+                        "delivery_month": "2026-06-01",
+                        "price": price,
+                    },
+                    headers=headers,
+                )
+                assert resp.status_code == 201
+
+            var_enqueue = await client.post(
+                "/api/v1/risk/var/run-async",
+                json={"book_id": book_id, "as_of_date": var_as_of, "scenario_window_days": 30},
+                headers=headers,
+            )
+            assert var_enqueue.status_code == 202
+            var_job_status = await _poll_until_complete(
+                client, f"/api/v1/risk/var/run-async/{var_enqueue.json()['job_id']}", headers
+            )
+            var_result_id = var_job_status["result"]
+            assert var_result_id is not None
+
+            var_resp = await client.get(f"/api/v1/risk/var/{var_result_id}", headers=headers)
+            assert var_resp.status_code == 200
+            assert var_resp.json()["var_value"] >= 0.0
+    finally:
+        # Dispose the shared engine's pool and the cached Redis client so neither
+        # leaves a connection bound to this test's event loop for another real-DB/
+        # real-Redis test function (potentially on a different loop) to inherit --
+        # see test_limit_concurrency.py's module docstring for the DB-engine version
+        # of this failure (RuntimeError: Future attached to a different loop), which
+        # is exactly what broke this test the first time these two files ran
+        # together in the same CI job.
+        await engine.dispose()
+        await reset_redis_client()

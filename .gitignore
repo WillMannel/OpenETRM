@@ -6,6 +6,10 @@ __pycache__/
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
+backend/openapi.json
+# Written by a locally-run redis-server (e.g. during manual verification of
+# real-Postgres/real-Redis integration tests) into whatever the cwd was.
+dump.rdb
 
 # Node / frontend
 node_modules/

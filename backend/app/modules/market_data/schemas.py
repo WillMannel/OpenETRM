@@ -4,13 +4,14 @@ from datetime import date, datetime
 from pydantic import BaseModel, ConfigDict
 
 from app.common.enums import Commodity, CurveMethod, CurveStatus, MarketDataSource
+from app.common.money import MoneyDecimal
 
 
 class MarketDataPointCreate(BaseModel):
     commodity: Commodity = Commodity.HENRY_HUB
     quote_date: date
     delivery_month: date
-    price: float
+    price: MoneyDecimal
     source: MarketDataSource = MarketDataSource.SEED
 
 
@@ -20,7 +21,7 @@ class MarketDataPointRead(BaseModel):
     commodity: Commodity
     quote_date: date
     delivery_month: date
-    price: float
+    price: MoneyDecimal
     source: MarketDataSource
 
 
@@ -32,7 +33,7 @@ class CurveBuildRequest(BaseModel):
 class CurvePointRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     delivery_month: date
-    price: float
+    price: MoneyDecimal
     tenor_bucket: str
 
 

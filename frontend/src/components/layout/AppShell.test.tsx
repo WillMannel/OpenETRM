@@ -3,6 +3,7 @@ import { render, screen } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { describe, expect, it } from "vitest";
 
+import { AuthProvider } from "../../auth/AuthContext";
 import { AppShell } from "./AppShell";
 
 function renderShell() {
@@ -10,11 +11,13 @@ function renderShell() {
   return render(
     <QueryClientProvider client={queryClient}>
       <MemoryRouter initialEntries={["/"]}>
-        <Routes>
-          <Route element={<AppShell />}>
-            <Route index element={<div>blotter placeholder</div>} />
-          </Route>
-        </Routes>
+        <AuthProvider>
+          <Routes>
+            <Route element={<AppShell />}>
+              <Route index element={<div>blotter placeholder</div>} />
+            </Route>
+          </Routes>
+        </AuthProvider>
       </MemoryRouter>
     </QueryClientProvider>,
   );

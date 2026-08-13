@@ -36,6 +36,24 @@ jobs:
       - run: pip install -e ".[dev]"
       - run: pytest -q
 
+  # Fails the build if a quant module (options pricing, VaR, sensitivities, stress,
+  # P&L attribution, curve bootstrap) doesn't have an independently-derived numeric
+  # regression pin -- see tests/golden/README.md for why that's a different, stronger
+  # bar than "pytest is green." Deliberately its own job (not folded into backend-test)
+  # so a coverage shortfall reports as a distinctly-named, easy-to-find CI failure.
+  quant-golden-coverage:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install -e ".[dev]"
+      - run: python scripts/check_quant_golden_coverage.py
+
   # Everything above runs against SQLite (fast, no external services). This job is the
   # one place that actually exercises Postgres/TimescaleDB + Redis + a live Arq worker:
   # it runs the real Alembic migration (never just Base.metadata.create_all) and the
@@ -70,6 +88,13 @@ jobs:
     env:
       DATABASE_URL: postgresql+asyncpg://openetrm:openetrm@localhost:5432/openetrm
       REDIS_URL: redis://localhost:6379/0
+      # `alembic upgrade head` below imports app.core.config directly (not via
+      # pytest/conftest.py), and Settings.environment defaults to "production" --
+      # secure by default, see app.core.config._validate_secrets -- which would
+      # refuse to even construct Settings without a real JWT_SECRET_KEY. This job
+      # never issues a real JWT, so "test" (relaxed to a warning, not a real secret)
+      # is correct here, same as tests/conftest.py sets for the plain `pytest -q` runs.
+      ENVIRONMENT: test
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -80,6 +105,7 @@ jobs:
       - run: pytest -q
         env:
           RUN_WORKER_E2E_TESTS: "1"
+          RUN_POSTGRES_CONCURRENCY_TESTS: "1"
 
   # FastAPI's generated OpenAPI schema doesn't need a live DB (confirmed: the app
   # serves /openapi.json fine with no Postgres/Redis reachable), so this stays cheap
@@ -95,6 +121,10 @@ jobs:
         working-directory: backend
       - run: python -c "import json; from app.main import app; json.dump(app.openapi(), open('openapi.json', 'w'))"
         working-directory: backend
+        env:
+          # Imports app.main directly, not via pytest/conftest.py -- see the
+          # backend-integration-postgres job's identical comment on ENVIRONMENT.
+          ENVIRONMENT: test
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
@@ -133,8 +163,71 @@ jobs:
         backend-integration-postgres,
         contract-check,
         frontend-lint-and-test,
+        quant-golden-coverage,
       ]
     steps:
       - uses: actions/checkout@v4
       - run: docker build -t openetrm-api ./backend
+      # frontend/Dockerfile (the default) is the production nginx image;
+      # Dockerfile.dev is what docker-compose.yml's `web` service actually runs --
+      # both need to build cleanly, since a broken Dockerfile.dev would silently
+      # never be caught by building only the default one.
       - run: docker build -t openetrm-web ./frontend
+      - run: docker build -t openetrm-web-dev -f ./frontend/Dockerfile.dev ./frontend
+      # pip-audit/npm audit (the dependency-audit job) only see *source*
+      # dependencies -- they can't catch an OS-package CVE baked into the base
+      # image itself (python:3.11-slim, nginxinc/nginx-unprivileged). Trivy scans
+      # the actual built images. ignore-unfixed: a CVE with no available fix yet
+      # isn't something this repo can act on by bumping a pin; failing the build on
+      # those would be a gate nobody can close, just noise to route around.
+      - name: Scan openetrm-api for CRITICAL/HIGH CVEs
+        uses: aquasecurity/trivy-action@v0.24.0
+        with:
+          image-ref: openetrm-api
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          exit-code: "1"
+      - name: Scan openetrm-web for CRITICAL/HIGH CVEs
+        uses: aquasecurity/trivy-action@v0.24.0
+        with:
+          image-ref: openetrm-web
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          exit-code: "1"
+
+  # Fails the build on a known-vulnerable dependency. Advisory-only in spirit (pins
+  # aren't bumped automatically here -- see FUTURE_WORK.md), but a red check here is
+  # meant to actually block a merge, not just log a warning nobody reads.
+  dependency-audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      # Upgrade pip/setuptools first -- the runner image's bundled versions are
+      # whatever was current when that image was built, not necessarily patched
+      # against the latest advisories (caught locally: a stale bundled setuptools
+      # flagged a real CVE that `pip install --upgrade` alone resolved).
+      - run: pip install --upgrade pip setuptools pip-audit
+      - run: pip install -e ".[dev]"
+        working-directory: backend
+      # --local: audits exactly what's installed in this environment (this project's
+      # own pins + their resolved transitive deps), not pip-audit's own environment.
+      - run: pip-audit --local
+        working-directory: backend
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm install
+        working-directory: frontend
+      # --omit=dev: gate on what actually ships to users. The dev-only vite/vitest/
+      # esbuild chain (build tooling, never bundled into the production output)
+      # carries its own advisories most Vite projects live with until a major-version
+      # bump; blocking merges on those would be noisy enough to get ignored, and
+      # they're not part of what a deployed instance actually runs -- see
+      # FUTURE_WORK.md for tracking that upgrade separately from this gate.
+      - run: npm audit --omit=dev --audit-level=high
+        working-directory: frontend

@@ -5,7 +5,7 @@ import { useCurve, useBuildCurve } from "../../hooks/useCurve";
 import { useSelection } from "../../hooks/useSelection";
 
 export function CurveViewerPage() {
-  const { asOfDate } = useSelection();
+  const { asOfDate, commodity } = useSelection();
   const buildCurve = useBuildCurve();
   const [curveId, setCurveId] = useState<string | undefined>(undefined);
   const { data: curve, isLoading } = useCurve(curveId);
@@ -19,11 +19,11 @@ export function CurveViewerPage() {
           className="bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-medium px-4 py-1.5 rounded-md disabled:opacity-50"
           disabled={buildCurve.isPending}
           onClick={async () => {
-            const built = await buildCurve.mutateAsync(asOfDate);
+            const built = await buildCurve.mutateAsync({ asOfDate, commodity });
             setCurveId(built.id);
           }}
         >
-          {buildCurve.isPending ? "Building…" : `Build curve as of ${asOfDate}`}
+          {buildCurve.isPending ? "Building…" : `Build ${commodity} curve as of ${asOfDate}`}
         </button>
         {buildCurve.isError && (
           <span className="text-sm text-red-400">

@@ -4,6 +4,175 @@
  */
 
 export interface paths {
+    "/api/v1/auth/register": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Register */
+        post: operations["register_api_v1_auth_register_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/auth/login": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Login
+         * @description Rate-limited: more than Settings.login_rate_limit_max_attempts failed
+         *     attempts for the same (client IP, username) pair within the window gets a 429
+         *     -- see app.modules.auth.rate_limit. `request.client.host` is the direct TCP
+         *     peer, not an `X-Forwarded-For` header -- a deployment behind a reverse proxy
+         *     needs to terminate/normalize that itself (e.g. Starlette's
+         *     `ProxyHeadersMiddleware`) for this to reflect real client IPs; blindly trusting
+         *     a client-supplied header here would let an attacker bypass the limiter by
+         *     sending a different one on every request.
+         */
+        post: operations["login_api_v1_auth_login_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/auth/refresh": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Refresh
+         * @description Exchanges a refresh token for a new access + refresh token pair, rotating the
+         *     presented one (single-use -- see AuthService.refresh).
+         */
+        post: operations["refresh_api_v1_auth_refresh_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/auth/logout": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Logout
+         * @description Revokes the access token used to authenticate this call (added to the Redis
+         *     denylist -- see app.modules.auth.revocation) and, if provided, the refresh token
+         *     too. Both are optional to actually revoke successfully in isolation: a caller
+         *     might only have the access token handy (e.g. from an API-key-authenticated
+         *     session, where there's no refresh token to speak of).
+         */
+        post: operations["logout_api_v1_auth_logout_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/auth/me": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Me */
+        get: operations["get_me_api_v1_auth_me_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/auth/users": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Users */
+        get: operations["list_users_api_v1_auth_users_get"];
+        put?: never;
+        /**
+         * Create User
+         * @description Admin-only: create a user with any role. This is how TRADER/RISK_MANAGER/ADMIN
+         *     accounts get provisioned -- self-registration always lands as VIEWER.
+         */
+        post: operations["create_user_api_v1_auth_users_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/auth/users/{user_id}/api-keys": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Api Keys */
+        get: operations["list_api_keys_api_v1_auth_users__user_id__api_keys_get"];
+        put?: never;
+        /**
+         * Create Api Key
+         * @description Admin-only: mint a machine-to-machine credential for a service-account User
+         *     (provision the user via POST /auth/users first -- typically VIEWER, for a
+         *     read-only BI/pipeline integration). `api_key` in the response is the raw key --
+         *     it's shown here exactly once and cannot be retrieved again, only revoked.
+         */
+        post: operations["create_api_key_api_v1_auth_users__user_id__api_keys_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/auth/api-keys/{api_key_id}/revoke": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Revoke Api Key */
+        post: operations["revoke_api_key_api_v1_auth_api_keys__api_key_id__revoke_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/trades": {
         parameters: {
             query?: never;
@@ -33,6 +202,125 @@ export interface paths {
         get: operations["get_trade_api_v1_trades__trade_id__get"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/trades/{trade_id}/confirm": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Confirm Trade */
+        post: operations["confirm_trade_api_v1_trades__trade_id__confirm_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/trades/{trade_id}/amendments": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Request Amendment */
+        post: operations["request_amendment_api_v1_trades__trade_id__amendments_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/trades/{trade_id}/cancellations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Request Cancellation */
+        post: operations["request_cancellation_api_v1_trades__trade_id__cancellations_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/trade-change-requests": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Pending Change Requests */
+        get: operations["list_pending_change_requests_api_v1_trade_change_requests_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/trade-change-requests/{change_request_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Change Request */
+        get: operations["get_change_request_api_v1_trade_change_requests__change_request_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/trade-change-requests/{change_request_id}/approve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Approve Change Request */
+        post: operations["approve_change_request_api_v1_trade_change_requests__change_request_id__approve_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/trade-change-requests/{change_request_id}/reject": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Reject Change Request */
+        post: operations["reject_change_request_api_v1_trade_change_requests__change_request_id__reject_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -70,6 +358,76 @@ export interface paths {
         /** Create Book */
         post: operations["create_book_api_v1_books_post"];
         delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/desks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Desks */
+        get: operations["list_desks_api_v1_desks_get"];
+        put?: never;
+        /** Create Desk */
+        post: operations["create_desk_api_v1_desks_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/books/{book_id}/desk": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Assign Book Desk */
+        put: operations["assign_book_desk_api_v1_books__book_id__desk_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/books/{book_id}/members": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Book Members */
+        get: operations["list_book_members_api_v1_books__book_id__members_get"];
+        put?: never;
+        /** Grant Book Membership */
+        post: operations["grant_book_membership_api_v1_books__book_id__members_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/books/{book_id}/members/{user_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Revoke Book Membership */
+        delete: operations["revoke_book_membership_api_v1_books__book_id__members__user_id__delete"];
         options?: never;
         head?: never;
         patch?: never;
@@ -176,10 +534,43 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Get Book Pnl */
+        /**
+         * Get Book Pnl
+         * @description Pure read: computes mark-to-market fresh from live trades/the published curve
+         *     and returns it -- never writes a row, so calling this any number of times has no
+         *     side effect (see ValuationService.mark_to_market / compute_mark_to_market). For a
+         *     durable, reportable snapshot that BI tools and exports read, see
+         *     POST /positions/{book_id}/valuation-runs.
+         */
         get: operations["get_book_pnl_api_v1_positions__book_id__pnl_get"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/positions/{book_id}/valuation-runs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Create Valuation Run
+         * @description The deliberate write path: computes mark-to-market and persists it as a new
+         *     ValuationRun with its Position/ValuationResult rows, for audit history and for
+         *     reporting views/exports to read (they always read the latest run for a given
+         *     book/commodity/as_of_date -- see v_positions_flat/v_valuation_results_flat).
+         *     Role-gated the same as other risk/middle-office write actions (VaR runs, sensitivity
+         *     runs): booking a trade doesn't require publishing an official valuation snapshot,
+         *     but publishing one is a risk/middle-office action, not a trader self-service one.
+         */
+        post: operations["create_valuation_run_api_v1_positions__book_id__valuation_runs_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -197,9 +588,8 @@ export interface paths {
         put?: never;
         /**
          * Run Var
-         * @description Synchronous VaR run -- fine for v1's small position/history size. See
-         *     /risk/var/run-async for the background-job version (app.tasks.risk_tasks.run_var_job)
-         *     once scenario windows/position counts get large enough to matter.
+         * @description Synchronous VaR run -- fine at v1's data volumes. See /risk/var/run-async for the
+         *     background-job version (app.tasks.risk_tasks.run_var_job).
          */
         post: operations["run_var_api_v1_risk_var_run_post"];
         delete?: never;
@@ -314,6 +704,232 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/risk/stress-test": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Run Stress Test */
+        post: operations["run_stress_test_api_v1_risk_stress_test_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/risk/stress/{stress_result_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Stress Result */
+        get: operations["get_stress_result_api_v1_risk_stress__stress_result_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/risk/pnl-attribution": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Run Pnl Attribution */
+        post: operations["run_pnl_attribution_api_v1_risk_pnl_attribution_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/risk/options/greeks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Run Option Greeks */
+        post: operations["run_option_greeks_api_v1_risk_options_greeks_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/risk/options/greeks/{result_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Option Greeks Result */
+        get: operations["get_option_greeks_result_api_v1_risk_options_greeks__result_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/limits": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Limits */
+        get: operations["list_limits_api_v1_limits_get"];
+        put?: never;
+        /** Create Or Update Limit */
+        post: operations["create_or_update_limit_api_v1_limits_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/limits/breaches": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Open Breaches */
+        get: operations["list_open_breaches_api_v1_limits_breaches_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/limits/breaches/{breach_id}/acknowledge": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Acknowledge Breach */
+        post: operations["acknowledge_breach_api_v1_limits_breaches__breach_id__acknowledge_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/audit/{entity_type}/{entity_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Audit History
+         * @description Entitlement-checked -- see AuditService.history_for's docstring for why this
+         *     can't be a plain "any authenticated user" read.
+         */
+        get: operations["get_audit_history_api_v1_audit__entity_type___entity_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/export/trades": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Export Trades */
+        get: operations["export_trades_api_v1_export_trades_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/export/positions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Export Positions */
+        get: operations["export_positions_api_v1_export_positions_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/export/valuation-results": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Export Valuation Results */
+        get: operations["export_valuation_results_api_v1_export_valuation_results_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/export/var-results": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Export Var Results */
+        get: operations["export_var_results_api_v1_export_var_results_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/health": {
         parameters: {
             query?: never;
@@ -321,8 +937,61 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Health */
+        /**
+         * Health
+         * @description Liveness: the process is up and serving requests. Deliberately checks nothing
+         *     external -- a slow/down dependency should surface on /health/ready, not make the
+         *     orchestrator think the process itself needs restarting.
+         */
         get: operations["health_health_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/health/ready": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Readiness
+         * @description Readiness: can this instance actually serve traffic right now? Pings Postgres
+         *     and Redis; either being unreachable flips the response to 503 without raising, so
+         *     the body always reports which dependency failed.
+         *
+         *     Deliberately does *not* reuse the app's shared engine (app.core.db.engine) or Arq
+         *     pool (app.core.jobs.get_arq_pool) -- both cache a connection pool at module scope
+         *     for the process's one long-lived event loop, which is right for request handling
+         *     but wrong for a probe: a short-lived throwaway connection here means a real
+         *     network problem is always caught fresh, and it avoids ever handing a pooled
+         *     connection from *this* check to a future request on a different event loop (bit
+         *     us for real under pytest-asyncio's per-test-function event loops, where the shared
+         *     engine was getting reused across tests each on their own loop).
+         */
+        get: operations["readiness_health_ready_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/metrics": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Metrics */
+        get: operations["metrics_metrics_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -335,12 +1004,223 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /** AcknowledgeBreachRequest */
+        AcknowledgeBreachRequest: {
+            /** Note */
+            note?: string | null;
+        };
+        /** AdminUserCreate */
+        AdminUserCreate: {
+            /** Username */
+            username: string;
+            /**
+             * Email
+             * Format: email
+             */
+            email: string;
+            /** Password */
+            password: string;
+            /** @default VIEWER */
+            role: components["schemas"]["UserRole"];
+        };
+        /** AmendmentRequestCreate */
+        AmendmentRequestCreate: {
+            /** Changes */
+            changes: {
+                [key: string]: unknown;
+            };
+            /** Reason */
+            reason: string;
+        };
+        /** ApiKeyCreate */
+        ApiKeyCreate: {
+            /** Name */
+            name: string;
+            /** Expires At */
+            expires_at?: string | null;
+        };
+        /**
+         * ApiKeyCreated
+         * @description Returned only from the create endpoint -- the one and only time the raw key is
+         *     ever available. Store it now; it can't be retrieved again, only revoked.
+         */
+        ApiKeyCreated: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Name */
+            name: string;
+            /** Key Prefix */
+            key_prefix: string;
+            /** Api Key */
+            api_key: string;
+            /** Expires At */
+            expires_at: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+        };
+        /** ApiKeyRead */
+        ApiKeyRead: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * User Id
+             * Format: uuid
+             */
+            user_id: string;
+            /** Name */
+            name: string;
+            /** Key Prefix */
+            key_prefix: string;
+            /** Created By User Id */
+            created_by_user_id: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Last Used At */
+            last_used_at: string | null;
+            /** Expires At */
+            expires_at: string | null;
+            /** Revoked At */
+            revoked_at: string | null;
+        };
+        /** AuditLogRead */
+        AuditLogRead: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Entity Type */
+            entity_type: string;
+            /**
+             * Entity Id
+             * Format: uuid
+             */
+            entity_id: string;
+            /** Action */
+            action: string;
+            /** Actor User Id */
+            actor_user_id: string | null;
+            /**
+             * Occurred At
+             * Format: date-time
+             */
+            occurred_at: string;
+            /** Before */
+            before: {
+                [key: string]: unknown;
+            } | null;
+            /** After */
+            after: {
+                [key: string]: unknown;
+            } | null;
+            /** Note */
+            note: string | null;
+        };
         /** BookCreate */
         BookCreate: {
             /** Name */
             name: string;
             /** Description */
             description?: string | null;
+        };
+        /** BookDeskAssign */
+        BookDeskAssign: {
+            /** Desk Id */
+            desk_id: string | null;
+        };
+        /** BookLimitCreate */
+        BookLimitCreate: {
+            /**
+             * Book Id
+             * Format: uuid
+             */
+            book_id: string;
+            /** @default HENRY_HUB */
+            commodity: components["schemas"]["Commodity"];
+            limit_type: components["schemas"]["LimitType"];
+            /** Threshold */
+            threshold: number | string;
+            /**
+             * Confidence Level
+             * @default 95
+             */
+            confidence_level: number;
+        };
+        /** BookLimitRead */
+        BookLimitRead: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Book Id
+             * Format: uuid
+             */
+            book_id: string;
+            commodity: components["schemas"]["Commodity"];
+            limit_type: components["schemas"]["LimitType"];
+            /** Threshold */
+            threshold: number;
+            /** Confidence Level */
+            confidence_level: number;
+            /** Created By User Id */
+            created_by_user_id: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+        };
+        /** BookMembershipCreate */
+        BookMembershipCreate: {
+            /**
+             * User Id
+             * Format: uuid
+             */
+            user_id: string;
+        };
+        /** BookMembershipRead */
+        BookMembershipRead: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Book Id
+             * Format: uuid
+             */
+            book_id: string;
+            /**
+             * User Id
+             * Format: uuid
+             */
+            user_id: string;
+            /** Granted By User Id */
+            granted_by_user_id: string | null;
+            /**
+             * Granted At
+             * Format: date-time
+             */
+            granted_at: string;
         };
         /** BookPnlSummary */
         BookPnlSummary: {
@@ -372,17 +1252,34 @@ export interface components {
             name: string;
             /** Description */
             description?: string | null;
+            /** Desk Id */
+            desk_id?: string | null;
         };
         /**
          * BuySell
          * @enum {string}
          */
         BuySell: "BUY" | "SELL";
+        /** CancellationRequestCreate */
+        CancellationRequestCreate: {
+            /** Reason */
+            reason: string;
+        };
+        /**
+         * ChangeRequestStatus
+         * @enum {string}
+         */
+        ChangeRequestStatus: "PENDING" | "APPROVED" | "REJECTED";
+        /**
+         * ChangeRequestType
+         * @enum {string}
+         */
+        ChangeRequestType: "AMENDMENT" | "CANCELLATION";
         /**
          * Commodity
          * @enum {string}
          */
-        Commodity: "HENRY_HUB";
+        Commodity: "HENRY_HUB" | "WTI" | "COAL" | "POWER";
         /**
          * ConfidenceLevel
          * @enum {integer}
@@ -479,6 +1376,25 @@ export interface components {
             /** @default HENRY_HUB */
             commodity: components["schemas"]["Commodity"];
         };
+        /** DeskCreate */
+        DeskCreate: {
+            /** Name */
+            name: string;
+            /** Description */
+            description?: string | null;
+        };
+        /** DeskRead */
+        DeskRead: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Name */
+            name: string;
+            /** Description */
+            description: string | null;
+        };
         /** ForwardCurveRead */
         ForwardCurveRead: {
             /**
@@ -524,6 +1440,70 @@ export interface components {
             /** Result */
             result?: unknown | null;
         };
+        /** LimitBreachRead */
+        LimitBreachRead: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Limit Id
+             * Format: uuid
+             */
+            limit_id: string;
+            /**
+             * Book Id
+             * Format: uuid
+             */
+            book_id: string;
+            commodity: components["schemas"]["Commodity"];
+            limit_type: components["schemas"]["LimitType"];
+            /** Threshold */
+            threshold: number;
+            /** Observed Value */
+            observed_value: number;
+            /**
+             * As Of Date
+             * Format: date
+             */
+            as_of_date: string;
+            status: components["schemas"]["LimitBreachStatus"];
+            /**
+             * Occurred At
+             * Format: date-time
+             */
+            occurred_at: string;
+            /** Acknowledged By User Id */
+            acknowledged_by_user_id: string | null;
+            /** Acknowledged At */
+            acknowledged_at: string | null;
+        };
+        /**
+         * LimitBreachStatus
+         * @enum {string}
+         */
+        LimitBreachStatus: "OPEN" | "ACKNOWLEDGED";
+        /**
+         * LimitType
+         * @description VOLUME: max absolute net volume (per delivery month) a book may hold in a given
+         *     commodity. VAR: max 1-day VaR (at the limit's configured confidence level) a book
+         *     may run before it's flagged.
+         * @enum {string}
+         */
+        LimitType: "VOLUME" | "VAR";
+        /** LoginRequest */
+        LoginRequest: {
+            /** Username */
+            username: string;
+            /** Password */
+            password: string;
+        };
+        /** LogoutRequest */
+        LogoutRequest: {
+            /** Refresh Token */
+            refresh_token?: string | null;
+        };
         /** MarketDataPointCreate */
         MarketDataPointCreate: {
             /** @default HENRY_HUB */
@@ -539,7 +1519,7 @@ export interface components {
              */
             delivery_month: string;
             /** Price */
-            price: number;
+            price: number | string;
             /** @default SEED */
             source: components["schemas"]["MarketDataSource"];
         };
@@ -570,6 +1550,113 @@ export interface components {
          * @enum {string}
          */
         MarketDataSource: "SEED" | "MANUAL";
+        /** OptionGreeksRead */
+        OptionGreeksRead: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Trade Id
+             * Format: uuid
+             */
+            trade_id: string;
+            /** Delta */
+            delta: number;
+            /** Gamma */
+            gamma: number;
+            /** Vega */
+            vega: number;
+            /** Theta */
+            theta: number;
+            /** Risk Free Rate Used */
+            risk_free_rate_used?: number | null;
+            /** Code Version */
+            code_version?: string | null;
+        };
+        /** OptionGreeksRequest */
+        OptionGreeksRequest: {
+            /**
+             * Book Id
+             * Format: uuid
+             */
+            book_id: string;
+            /**
+             * As Of Date
+             * Format: date
+             */
+            as_of_date: string;
+            /** @default HENRY_HUB */
+            commodity: components["schemas"]["Commodity"];
+        };
+        /** OptionGreeksResponse */
+        OptionGreeksResponse: {
+            /**
+             * Book Id
+             * Format: uuid
+             */
+            book_id: string;
+            /**
+             * As Of Date
+             * Format: date
+             */
+            as_of_date: string;
+            /** Results */
+            results: components["schemas"]["OptionGreeksRead"][];
+        };
+        /**
+         * OptionType
+         * @enum {string}
+         */
+        OptionType: "CALL" | "PUT";
+        /** PnlAttributionRequest */
+        PnlAttributionRequest: {
+            /**
+             * Book Id
+             * Format: uuid
+             */
+            book_id: string;
+            /**
+             * Prior Date
+             * Format: date
+             */
+            prior_date: string;
+            /**
+             * Current Date
+             * Format: date
+             */
+            current_date: string;
+            /** @default HENRY_HUB */
+            commodity: components["schemas"]["Commodity"];
+        };
+        /** PnlAttributionResponse */
+        PnlAttributionResponse: {
+            /**
+             * Book Id
+             * Format: uuid
+             */
+            book_id: string;
+            /**
+             * Prior Date
+             * Format: date
+             */
+            prior_date: string;
+            /**
+             * Current Date
+             * Format: date
+             */
+            current_date: string;
+            /** Price Effect */
+            price_effect: number;
+            /**
+             * New Trade Effect
+             * @description MTM of trades booked between prior_date and current_date
+             */
+            new_trade_effect: number;
+            /** Total */
+            total: number;
+        };
         /** PositionRead */
         PositionRead: {
             /**
@@ -593,6 +1680,25 @@ export interface components {
              */
             as_of_date: string;
         };
+        /**
+         * PowerBlock
+         * @description The defining characteristic of an OTC power product -- which hours of the day
+         *     the delivery obligation covers. v1 values against the same monthly curve price
+         *     regardless of block (documented simplification: no separate peak/off-peak curves
+         *     yet -- see FUTURE_WORK.md). Only meaningful for Commodity.POWER trades.
+         * @enum {string}
+         */
+        PowerBlock: "ON_PEAK" | "OFF_PEAK" | "FLAT";
+        /** RefreshRequest */
+        RefreshRequest: {
+            /** Refresh Token */
+            refresh_token: string;
+        };
+        /** ReviewDecision */
+        ReviewDecision: {
+            /** Note */
+            note?: string | null;
+        };
         /** SensitivityResultRead */
         SensitivityResultRead: {
             /** Tenor Bucket */
@@ -601,6 +1707,119 @@ export interface components {
             delta_value: number;
             /** Bump Size */
             bump_size: number;
+            /** Trade Ids Used */
+            trade_ids_used?: string[] | null;
+            /** Code Version */
+            code_version?: string | null;
+        };
+        /** StressResultRead */
+        StressResultRead: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Scenario Name */
+            scenario_name: string;
+            /** Pnl Impact */
+            pnl_impact: number;
+            /** Trade Ids Used */
+            trade_ids_used?: string[] | null;
+            /** Code Version */
+            code_version?: string | null;
+        };
+        /** StressScenarioIn */
+        StressScenarioIn: {
+            /** Name */
+            name: string;
+            /**
+             * Shock Type
+             * @enum {string}
+             */
+            shock_type: "absolute" | "percentage";
+            /** Shock Value */
+            shock_value: number;
+        };
+        /** StressTestRequest */
+        StressTestRequest: {
+            /**
+             * Book Id
+             * Format: uuid
+             */
+            book_id: string;
+            /**
+             * As Of Date
+             * Format: date
+             */
+            as_of_date: string;
+            /** @default HENRY_HUB */
+            commodity: components["schemas"]["Commodity"];
+            /** Scenarios */
+            scenarios?: components["schemas"]["StressScenarioIn"][] | null;
+        };
+        /** StressTestResponse */
+        StressTestResponse: {
+            /**
+             * Book Id
+             * Format: uuid
+             */
+            book_id: string;
+            /**
+             * As Of Date
+             * Format: date
+             */
+            as_of_date: string;
+            /** Results */
+            results: components["schemas"]["StressResultRead"][];
+        };
+        /** TokenResponse */
+        TokenResponse: {
+            /** Access Token */
+            access_token: string;
+            /** Refresh Token */
+            refresh_token: string;
+            /**
+             * Token Type
+             * @default bearer
+             */
+            token_type: string;
+        };
+        /** TradeChangeRequestRead */
+        TradeChangeRequestRead: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Trade Id
+             * Format: uuid
+             */
+            trade_id: string;
+            change_type: components["schemas"]["ChangeRequestType"];
+            status: components["schemas"]["ChangeRequestStatus"];
+            /** Proposed Changes */
+            proposed_changes: {
+                [key: string]: unknown;
+            } | null;
+            /** Reason */
+            reason: string;
+            /**
+             * Requested By User Id
+             * Format: uuid
+             */
+            requested_by_user_id: string;
+            /**
+             * Requested At
+             * Format: date-time
+             */
+            requested_at: string;
+            /** Reviewed By User Id */
+            reviewed_by_user_id: string | null;
+            /** Reviewed At */
+            reviewed_at: string | null;
+            /** Review Note */
+            review_note: string | null;
         };
         /** TradeCreate */
         TradeCreate: {
@@ -624,11 +1843,11 @@ export interface components {
             trade_type: components["schemas"]["TradeType"];
             buy_sell: components["schemas"]["BuySell"];
             /** Volume */
-            volume: number;
+            volume: number | string;
             /** @default MMBTU */
             volume_unit: components["schemas"]["VolumeUnit"];
             /** Fixed Price */
-            fixed_price: number;
+            fixed_price?: number | string | null;
             /** @default USD */
             price_currency: components["schemas"]["Currency"];
             /**
@@ -646,6 +1865,18 @@ export interface components {
              * @default HENRY_HUB_PENULTIMATE
              */
             floating_index: string;
+            option_type?: components["schemas"]["OptionType"] | null;
+            /** Strike Price */
+            strike_price?: number | string | null;
+            /** Premium */
+            premium?: number | string | null;
+            /** Option Volatility */
+            option_volatility?: number | null;
+            power_block?: components["schemas"]["PowerBlock"] | null;
+            /** Certificate Registry */
+            certificate_registry?: string | null;
+            /** Vintage Year */
+            vintage_year?: number | null;
         };
         /** TradeRead */
         TradeRead: {
@@ -668,7 +1899,7 @@ export interface components {
             volume: number;
             volume_unit: components["schemas"]["VolumeUnit"];
             /** Fixed Price */
-            fixed_price: number;
+            fixed_price: number | null;
             price_currency: components["schemas"]["Currency"];
             /**
              * Delivery Start Month
@@ -682,7 +1913,25 @@ export interface components {
             delivery_end_month: string;
             /** Floating Index */
             floating_index: string;
+            option_type: components["schemas"]["OptionType"] | null;
+            /** Strike Price */
+            strike_price: number | null;
+            /** Premium */
+            premium: number | null;
+            /** Option Volatility */
+            option_volatility: number | null;
+            power_block: components["schemas"]["PowerBlock"] | null;
+            /** Certificate Registry */
+            certificate_registry: string | null;
+            /** Vintage Year */
+            vintage_year: number | null;
             status: components["schemas"]["TradeStatus"];
+            /** Version */
+            version: number;
+            /** Previous Version Id */
+            previous_version_id: string | null;
+            /** Created By User Id */
+            created_by_user_id: string | null;
             /**
              * Created At
              * Format: date-time
@@ -696,14 +1945,65 @@ export interface components {
         };
         /**
          * TradeStatus
+         * @description A trade's lifecycle state. NEW is a draft that doesn't count toward positions
+         *     until CONFIRMED. PENDING_AMENDMENT/PENDING_CANCELLATION trades still count (they're
+         *     economically live until the change is approved or rejected). AMENDED means this row
+         *     has been superseded by a newer version (see Trade.previous_version_id on the new
+         *     row) and no longer counts. CANCELLED trades never count.
          * @enum {string}
          */
-        TradeStatus: "NEW" | "VALIDATED" | "CANCELLED";
+        TradeStatus: "NEW" | "CONFIRMED" | "PENDING_AMENDMENT" | "PENDING_CANCELLATION" | "AMENDED" | "CANCELLED";
         /**
          * TradeType
          * @enum {string}
          */
-        TradeType: "SWAP" | "FORWARD";
+        TradeType: "SWAP" | "FORWARD" | "OPTION" | "REC" | "EMISSIONS_ALLOWANCE";
+        /** UserRead */
+        UserRead: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Username */
+            username: string;
+            /** Email */
+            email: string;
+            role: components["schemas"]["UserRole"];
+            /** Is Active */
+            is_active: boolean;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+        };
+        /**
+         * UserRegister
+         * @description Self-service signup -- always lands as VIEWER. Elevated roles are granted by an
+         *     admin via POST /auth/users, never chosen by the registrant.
+         */
+        UserRegister: {
+            /** Username */
+            username: string;
+            /**
+             * Email
+             * Format: email
+             */
+            email: string;
+            /** Password */
+            password: string;
+        };
+        /**
+         * UserRole
+         * @description VIEWER: read-only. TRADER: capture trades, request amendments/cancellations.
+         *     RISK_MANAGER: everything TRADER can view, run risk, approve/reject change requests
+         *     and confirmations. ADMIN: RISK_MANAGER plus user management. Four-eyes is enforced
+         *     at the service layer (an approver may not be the same user who requested the
+         *     change), not by role alone.
+         * @enum {string}
+         */
+        UserRole: "VIEWER" | "TRADER" | "RISK_MANAGER" | "ADMIN";
         /** ValidationError */
         ValidationError: {
             /** Location */
@@ -717,6 +2017,109 @@ export interface components {
             /** Context */
             ctx?: Record<string, never>;
         };
+        /** ValuationResultRead */
+        ValuationResultRead: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Trade Id */
+            trade_id: string | null;
+            /** Book Id */
+            book_id: string | null;
+            /**
+             * As Of Date
+             * Format: date
+             */
+            as_of_date: string;
+            /**
+             * Curve Id
+             * Format: uuid
+             */
+            curve_id: string;
+            /** Mtm Value */
+            mtm_value: number;
+            /** Realized Pnl */
+            realized_pnl: number;
+            /** Unrealized Pnl */
+            unrealized_pnl: number;
+            currency: components["schemas"]["Currency"];
+            /** Risk Free Rate Used */
+            risk_free_rate_used?: number | null;
+            /**
+             * Computed At
+             * Format: date-time
+             */
+            computed_at: string;
+        };
+        /** ValuationRunCreate */
+        ValuationRunCreate: {
+            /**
+             * As Of Date
+             * Format: date
+             */
+            as_of_date: string;
+            /** @default HENRY_HUB */
+            commodity: components["schemas"]["Commodity"];
+        };
+        /** ValuationRunRead */
+        ValuationRunRead: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Book Id
+             * Format: uuid
+             */
+            book_id: string;
+            commodity: components["schemas"]["Commodity"];
+            /**
+             * As Of Date
+             * Format: date
+             */
+            as_of_date: string;
+            /**
+             * Curve Id
+             * Format: uuid
+             */
+            curve_id: string;
+            /** Computed By User Id */
+            computed_by_user_id: string | null;
+            /** Trade Ids Used */
+            trade_ids_used?: string[] | null;
+            /** Code Version */
+            code_version?: string | null;
+            /**
+             * Computed At
+             * Format: date-time
+             */
+            computed_at: string;
+        };
+        /**
+         * ValuationRunSummary
+         * @description The persisted counterpart of BookPnlSummary -- returned by the write endpoint
+         *     that creates a new ValuationRun, so the caller sees the same numbers GET /pnl would
+         *     have shown, plus the run's identity for audit/lineage.
+         */
+        ValuationRunSummary: {
+            run: components["schemas"]["ValuationRunRead"];
+            /** Total Mtm Value */
+            total_mtm_value: number;
+            /** Total Unrealized Pnl */
+            total_unrealized_pnl: number;
+            /** Positions */
+            positions: components["schemas"]["PositionRead"][];
+            /** Results */
+            results: components["schemas"]["ValuationResultRead"][];
+        };
+        /**
+         * VarMethod
+         * @enum {string}
+         */
+        VarMethod: "HISTORICAL_SIM" | "PARAMETRIC" | "MONTE_CARLO";
         /** VarResultRead */
         VarResultRead: {
             /**
@@ -726,6 +2129,7 @@ export interface components {
             id: string;
             /** Book Id */
             book_id: string | null;
+            commodity: components["schemas"]["Commodity"] | null;
             /**
              * As Of Date
              * Format: date
@@ -741,6 +2145,12 @@ export interface components {
             scenario_window_days: number;
             /** Var Value */
             var_value: number;
+            /** Trade Ids Used */
+            trade_ids_used?: string[] | null;
+            /** Market Data Point Ids */
+            market_data_point_ids?: string[] | null;
+            /** Code Version */
+            code_version?: string | null;
             /**
              * Computed At
              * Format: date-time
@@ -765,12 +2175,14 @@ export interface components {
              * @default 250
              */
             scenario_window_days: number;
+            /** @default HISTORICAL_SIM */
+            method: components["schemas"]["VarMethod"];
         };
         /**
          * VolumeUnit
          * @enum {string}
          */
-        VolumeUnit: "MMBTU";
+        VolumeUnit: "MMBTU" | "BBL" | "MWH" | "METRIC_TON";
     };
     responses: never;
     parameters: never;
@@ -780,6 +2192,306 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+    register_api_v1_auth_register_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UserRegister"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UserRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    login_api_v1_auth_login_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LoginRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TokenResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    refresh_api_v1_auth_refresh_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RefreshRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TokenResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    logout_api_v1_auth_logout_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LogoutRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_me_api_v1_auth_me_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UserRead"];
+                };
+            };
+        };
+    };
+    list_users_api_v1_auth_users_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UserRead"][];
+                };
+            };
+        };
+    };
+    create_user_api_v1_auth_users_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AdminUserCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UserRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_api_keys_api_v1_auth_users__user_id__api_keys_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                user_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiKeyRead"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_api_key_api_v1_auth_users__user_id__api_keys_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                user_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ApiKeyCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiKeyCreated"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    revoke_api_key_api_v1_auth_api_keys__api_key_id__revoke_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                api_key_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiKeyRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     list_trades_api_v1_trades_get: {
         parameters: {
             query?: {
@@ -864,6 +2576,228 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["TradeRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    confirm_trade_api_v1_trades__trade_id__confirm_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                trade_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TradeRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    request_amendment_api_v1_trades__trade_id__amendments_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                trade_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AmendmentRequestCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TradeChangeRequestRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    request_cancellation_api_v1_trades__trade_id__cancellations_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                trade_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CancellationRequestCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TradeChangeRequestRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_pending_change_requests_api_v1_trade_change_requests_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TradeChangeRequestRead"][];
+                };
+            };
+        };
+    };
+    get_change_request_api_v1_trade_change_requests__change_request_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                change_request_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TradeChangeRequestRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    approve_change_request_api_v1_trade_change_requests__change_request_id__approve_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                change_request_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReviewDecision"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TradeChangeRequestRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    reject_change_request_api_v1_trade_change_requests__change_request_id__reject_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                change_request_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReviewDecision"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TradeChangeRequestRead"];
                 };
             };
             /** @description Validation Error */
@@ -971,6 +2905,188 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["BookRead"];
                 };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_desks_api_v1_desks_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DeskRead"][];
+                };
+            };
+        };
+    };
+    create_desk_api_v1_desks_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DeskCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DeskRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    assign_book_desk_api_v1_books__book_id__desk_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                book_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BookDeskAssign"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_book_members_api_v1_books__book_id__members_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                book_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BookMembershipRead"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    grant_book_membership_api_v1_books__book_id__members_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                book_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BookMembershipCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BookMembershipRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    revoke_book_membership_api_v1_books__book_id__members__user_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                book_id: string;
+                user_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Validation Error */
             422: {
@@ -1165,6 +3281,41 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["BookPnlSummary"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_valuation_run_api_v1_positions__book_id__valuation_runs_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                book_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ValuationRunCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ValuationRunSummary"];
                 };
             };
             /** @description Validation Error */
@@ -1403,6 +3554,469 @@ export interface operations {
             };
         };
     };
+    run_stress_test_api_v1_risk_stress_test_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["StressTestRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StressTestResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_stress_result_api_v1_risk_stress__stress_result_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                stress_result_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StressResultRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    run_pnl_attribution_api_v1_risk_pnl_attribution_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PnlAttributionRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PnlAttributionResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    run_option_greeks_api_v1_risk_options_greeks_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OptionGreeksRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OptionGreeksResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_option_greeks_result_api_v1_risk_options_greeks__result_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                result_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OptionGreeksRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_limits_api_v1_limits_get: {
+        parameters: {
+            query?: {
+                book_id?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BookLimitRead"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_or_update_limit_api_v1_limits_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BookLimitCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BookLimitRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_open_breaches_api_v1_limits_breaches_get: {
+        parameters: {
+            query?: {
+                book_id?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LimitBreachRead"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    acknowledge_breach_api_v1_limits_breaches__breach_id__acknowledge_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                breach_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AcknowledgeBreachRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LimitBreachRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_audit_history_api_v1_audit__entity_type___entity_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                entity_type: string;
+                entity_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AuditLogRead"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    export_trades_api_v1_export_trades_get: {
+        parameters: {
+            query?: {
+                format?: "csv" | "json" | "parquet";
+                book_id?: string | null;
+                updated_since?: string | null;
+                limit?: number;
+                offset?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    export_positions_api_v1_export_positions_get: {
+        parameters: {
+            query: {
+                as_of_date: string;
+                format?: "csv" | "json" | "parquet";
+                book_id?: string | null;
+                limit?: number;
+                offset?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    export_valuation_results_api_v1_export_valuation_results_get: {
+        parameters: {
+            query?: {
+                format?: "csv" | "json" | "parquet";
+                book_id?: string | null;
+                updated_since?: string | null;
+                limit?: number;
+                offset?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    export_var_results_api_v1_export_var_results_get: {
+        parameters: {
+            query?: {
+                format?: "csv" | "json" | "parquet";
+                book_id?: string | null;
+                updated_since?: string | null;
+                limit?: number;
+                offset?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     health_health_get: {
         parameters: {
             query?: never;
@@ -1421,6 +4035,48 @@ export interface operations {
                     "application/json": {
                         [key: string]: string;
                     };
+                };
+            };
+        };
+    };
+    readiness_health_ready_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    metrics_metrics_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
                 };
             };
         };

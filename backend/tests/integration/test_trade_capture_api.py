@@ -2,11 +2,15 @@ import pytest
 from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.common.enums import UserRole
 from app.modules.trade_capture.models import Book, Counterparty
+from tests.conftest import AuthHeadersFactory
 
 
 @pytest.mark.asyncio
-async def test_create_and_list_trade(client: AsyncClient, db_session: AsyncSession):
+async def test_create_and_list_trade(
+    client: AsyncClient, db_session: AsyncSession, auth_headers: AuthHeadersFactory
+):
     counterparty = Counterparty(name="Acme Energy Trading")
     book = Book(name="NatGas Desk")
     db_session.add_all([counterparty, book])
@@ -24,11 +28,16 @@ async def test_create_and_list_trade(client: AsyncClient, db_session: AsyncSessi
         "delivery_end_month": "2026-08-01",
     }
 
-    create_resp = await client.post("/api/v1/trades", json=payload)
+    trader_headers = await auth_headers(UserRole.TRADER)
+    create_resp = await client.post("/api/v1/trades", json=payload, headers=trader_headers)
     assert create_resp.status_code == 201
     trade_id = create_resp.json()["id"]
+    assert create_resp.json()["status"] == "NEW"
 
-    list_resp = await client.get("/api/v1/trades", params={"book_id": str(book.id)})
+    viewer_headers = await auth_headers(UserRole.VIEWER)
+    list_resp = await client.get(
+        "/api/v1/trades", params={"book_id": str(book.id)}, headers=viewer_headers
+    )
     assert list_resp.status_code == 200
     trades = list_resp.json()
     assert len(trades) == 1
@@ -37,8 +46,44 @@ async def test_create_and_list_trade(client: AsyncClient, db_session: AsyncSessi
 
 
 @pytest.mark.asyncio
+async def test_list_trades_rejects_a_limit_above_the_enforced_maximum(
+    client: AsyncClient, db_session: AsyncSession, auth_headers: AuthHeadersFactory
+):
+    """Regression test for task P1-9 (see ARCHITECTURE.md's "Scale and
+    performance"): `limit` used to be a plain, unclamped `int`, so a caller could
+    pass an arbitrarily large value and force the server to materialize its entire
+    entitled trade set into memory. `_MAX_TRADE_LIST_LIMIT` in the router now
+    rejects anything past a sane cap with a 422, the same pattern
+    app.modules.export's bulk endpoints already used."""
+    viewer_headers = await auth_headers(UserRole.VIEWER)
+
+    too_large = await client.get(
+        "/api/v1/trades", params={"limit": 999_999_999}, headers=viewer_headers
+    )
+    assert too_large.status_code == 422
+
+    at_the_cap = await client.get("/api/v1/trades", params={"limit": 1000}, headers=viewer_headers)
+    assert at_the_cap.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_create_trade_requires_authentication(client: AsyncClient, db_session: AsyncSession):
+    resp = await client.post("/api/v1/trades", json={})
+    assert resp.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_create_trade_rejects_viewer_role(
+    client: AsyncClient, db_session: AsyncSession, auth_headers: AuthHeadersFactory
+):
+    viewer_headers = await auth_headers(UserRole.VIEWER)
+    resp = await client.post("/api/v1/trades", json={}, headers=viewer_headers)
+    assert resp.status_code == 403
+
+
+@pytest.mark.asyncio
 async def test_create_trade_rejects_invalid_delivery_range(
-    client: AsyncClient, db_session: AsyncSession
+    client: AsyncClient, db_session: AsyncSession, auth_headers: AuthHeadersFactory
 ):
     counterparty = Counterparty(name="Beta Gas Co")
     book = Book(name="Beta Book")
@@ -57,24 +102,31 @@ async def test_create_trade_rejects_invalid_delivery_range(
         "delivery_end_month": "2026-06-01",  # end before start -> invalid
     }
 
-    resp = await client.post("/api/v1/trades", json=payload)
+    trader_headers = await auth_headers(UserRole.TRADER)
+    resp = await client.post("/api/v1/trades", json=payload, headers=trader_headers)
     assert resp.status_code == 422
 
 
 @pytest.mark.asyncio
 async def test_create_and_list_counterparties_and_books(
-    client: AsyncClient, db_session: AsyncSession
+    client: AsyncClient, db_session: AsyncSession, auth_headers: AuthHeadersFactory
 ):
-    cp_resp = await client.post("/api/v1/counterparties", json={"name": "Delta Energy"})
+    trader_headers = await auth_headers(UserRole.TRADER)
+    cp_resp = await client.post(
+        "/api/v1/counterparties", json={"name": "Delta Energy"}, headers=trader_headers
+    )
     assert cp_resp.status_code == 201
 
-    book_resp = await client.post("/api/v1/books", json={"name": "Delta Book"})
+    book_resp = await client.post(
+        "/api/v1/books", json={"name": "Delta Book"}, headers=trader_headers
+    )
     assert book_resp.status_code == 201
 
-    cp_list = await client.get("/api/v1/counterparties")
+    viewer_headers = await auth_headers(UserRole.VIEWER)
+    cp_list = await client.get("/api/v1/counterparties", headers=viewer_headers)
     assert cp_list.status_code == 200
     assert any(c["name"] == "Delta Energy" for c in cp_list.json())
 
-    book_list = await client.get("/api/v1/books")
+    book_list = await client.get("/api/v1/books", headers=viewer_headers)
     assert book_list.status_code == 200
     assert any(b["name"] == "Delta Book" for b in book_list.json())

@@ -19,6 +19,15 @@ dependencies = [
     "scipy>=1.14",
     "QuantLib>=1.35",
     "python-dateutil>=2.9",
+    "bcrypt>=4.2",
+    # [crypto] pulls in the `cryptography` package: RS256 verification (needed for
+    # OIDC/Entra ID JWKS-based token validation, see app.modules.auth.oidc) requires
+    # it -- PyJWT's HS256 path (the local access tokens) doesn't, but this way it's
+    # an explicit dependency, not something relied on being present transitively.
+    "pyjwt[crypto]>=2.9",
+    "email-validator>=2.2",
+    "prometheus-client>=0.21",
+    "pyarrow>=17.0",
 ]
 
 [project.optional-dependencies]
@@ -36,8 +45,18 @@ line-length = 100
 target-version = "py311"
 
 [tool.ruff.lint]
-select = ["E", "F", "I", "B", "RUF"]
+select = ["E", "F", "I", "B", "RUF", "S"]
 ignore = ["B008"]  # FastAPI's Depends(...) default-argument pattern is idiomatic, not a bug
+
+[tool.ruff.lint.per-file-ignores]
+# S101 (assert): pytest's whole idiom is `assert` -- that's not a security-relevant
+# assert-can-be-stripped-with-`-O` risk in test code, it's how tests fail.
+# S105/S106/S106 (hardcoded-password): every "password" in tests/scripts is a fixture
+# literal (e.g. "test-password-123"), never a real credential.
+"tests/*" = ["S101", "S105", "S106", "S107"]
+# S311 (pseudo-random): benchmark_scale.py's `random` calls generate synthetic seed
+# data volumes/prices/dates for a load-test harness, never anything security-sensitive.
+"scripts/*" = ["S101", "S105", "S106", "S107", "S311"]
 
 [tool.mypy]
 python_version = "3.11"

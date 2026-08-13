@@ -35,6 +35,14 @@ services:
     environment:
       DATABASE_URL: postgresql+asyncpg://openetrm:openetrm@postgres:5432/openetrm
       REDIS_URL: redis://redis:6379/0
+      # This stack is local-dev/demo only -- no real deployment target uses
+      # docker-compose.yml directly. ENVIRONMENT=development is what lets it boot
+      # without a JWT_SECRET_KEY override (app.core.config._validate_secrets only
+      # *warns* outside "production", the default everywhere else, which refuses to
+      # boot on the well-known default secret). Never set ENVIRONMENT=development for
+      # anything actually reachable by anyone but you: set a real JWT_SECRET_KEY
+      # (`openssl rand -hex 32`) instead and leave ENVIRONMENT unset/production.
+      ENVIRONMENT: development
     ports:
       - "8000:8000"
     command: >
@@ -50,14 +58,28 @@ services:
     environment:
       DATABASE_URL: postgresql+asyncpg://openetrm:openetrm@postgres:5432/openetrm
       REDIS_URL: redis://redis:6379/0
+      ENVIRONMENT: development # see the api service's comment above
     command: ["arq", "app.tasks.worker.WorkerSettings"]
+    # backend/Dockerfile's HEALTHCHECK curls the API's /health -- meaningless here,
+    # arq's worker never listens on that port. Disabling the inherited check rather
+    # than leaving it to just always report unhealthy.
+    healthcheck:
+      test: ["NONE"]
 
   web:
-    build: ./frontend
+    # Dockerfile.dev, not ./frontend's default production Dockerfile: this stack is
+    # local-dev/demo (hot reload, runtime VITE_API_BASE_URL) -- see Dockerfile.dev's
+    # header comment and frontend/Dockerfile's for the deployable production image.
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.dev
     depends_on:
       - api
     environment:
-      VITE_API_BASE_URL: http://localhost:8000/api/v1
+      # No /api/v1 suffix -- every frontend API call already includes it in the path
+      # it passes to apiClient (see frontend/src/api/client.ts's comment); adding it
+      # here too would double it up in the request URL actually sent to the backend.
+      VITE_API_BASE_URL: http://localhost:8000
     ports:
       - "5173:5173"
 
