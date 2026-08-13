@@ -17,6 +17,12 @@ COPY scripts ./scripts
 
 RUN python -m venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
+# Upgrade pip/setuptools/wheel first -- `python -m venv` bootstraps whatever
+# versions shipped with this base image, not necessarily patched against the
+# latest advisories (caught by this image's own Trivy scan in CI: a stale
+# bundled setuptools/wheel pulled in jaraco.context 5.3.0 and wheel 0.45.1,
+# both with fixed HIGH-severity CVEs -- CVE-2026-23949, CVE-2026-24049).
+RUN pip install --no-cache-dir --upgrade pip setuptools wheel
 RUN pip install --no-cache-dir .
 
 FROM python:3.11-slim
